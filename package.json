@@ -1,0 +1,26 @@
+{
+  "name": "cat-board-games",
+  "version": "0.1.0",
+  "private": true,
+  "description": "SVG board game collection themed around black and white Chinese domestic cats.",
+  "homepage": "https://11010tianyi.github.io/cat-board-games/",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "build": "tsc && vite build",
+    "preview": "vite preview --host 0.0.0.0"
+  },
+  "keywords": [
+    "bun",
+    "typescript",
+    "svg",
+    "board-game",
+    "cat"
+  ],
+  "author": "11010tianyi",
+  "license": "MIT",
+  "devDependencies": {
+    "typescript": "^5.9.3",
+    "vite": "^7.2.7"
+  }
+}
