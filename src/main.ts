@@ -33,7 +33,7 @@ const playerMeta: Record<Player, { name: string; title: string; eye: string }> =
   white: {
     name: "白猫",
     title: "白色淡黄眼睛长毛田园猫",
-    eye: "#fff2a8",
+    eye: "#f4df86",
   },
 };
 
@@ -87,32 +87,57 @@ function iconButton(action: string, icon: string, label: string, disabled = fals
 
 function catToken(side: Player, x: number, y: number, radius: number, label = "", selected = false) {
   const isWhite = side === "white";
-  const fur = isWhite ? "#fff8ea" : "#121212";
-  const inner = isWhite ? "#f2e2c8" : "#242424";
-  const stroke = isWhite ? "#a77844" : "#ffc928";
+  const fur = isWhite ? "#fffaf0" : "#12110f";
+  const bodyFur = isWhite ? "#fff5e4" : "#171613";
+  const inner = isWhite ? "#ffc7b5" : "#5b3328";
+  const stroke = isWhite ? "#c08a52" : "#f4c63e";
+  const softStroke = isWhite ? "#ead8bf" : "#3c352a";
+  const muzzle = isWhite ? "#fffdf7" : "#201f1c";
+  const nose = isWhite ? "#e58f8f" : "#28201d";
   const eye = playerMeta[side].eye;
   const earY = -radius * 0.78;
   const earX = radius * 0.55;
-  const hair = isWhite
-    ? `<path class="cat-hair" d="M ${-radius * 0.88} ${-radius * 0.18} C ${-radius * 1.2} ${radius * 0.24}, ${-radius * 0.96} ${radius * 0.86}, ${-radius * 0.48} ${radius * 1.02} M ${radius * 0.88} ${-radius * 0.18} C ${radius * 1.2} ${radius * 0.24}, ${radius * 0.96} ${radius * 0.86}, ${radius * 0.48} ${radius * 1.02}" />`
-    : `<path class="cat-short-fur" d="M ${-radius * 0.34} ${-radius * 0.9} L ${-radius * 0.16} ${-radius * 1.08} L 0 ${-radius * 0.9} L ${radius * 0.16} ${-radius * 1.08} L ${radius * 0.34} ${-radius * 0.9}" />`;
+  const faceShape = isWhite
+    ? `M 0 ${-radius} C ${radius * 0.64} ${-radius}, ${radius * 1.1} ${-radius * 0.5}, ${radius * 1.06} ${radius * 0.1} C ${radius * 1.17} ${radius * 0.52}, ${radius * 0.77} ${radius * 0.95}, ${radius * 0.28} ${radius * 1.06} C ${radius * 0.06} ${radius * 1.18}, ${-radius * 0.06} ${radius * 1.18}, ${-radius * 0.28} ${radius * 1.06} C ${-radius * 0.77} ${radius * 0.95}, ${-radius * 1.17} ${radius * 0.52}, ${-radius * 1.06} ${radius * 0.1} C ${-radius * 1.1} ${-radius * 0.5}, ${-radius * 0.64} ${-radius}, 0 ${-radius} Z`
+    : `M 0 ${-radius * 0.98} C ${radius * 0.62} ${-radius * 0.98}, ${radius * 0.98} ${-radius * 0.45}, ${radius * 0.92} ${radius * 0.16} C ${radius * 0.86} ${radius * 0.78}, ${radius * 0.38} ${radius * 1.02}, 0 ${radius * 1.05} C ${-radius * 0.38} ${radius * 1.02}, ${-radius * 0.86} ${radius * 0.78}, ${-radius * 0.92} ${radius * 0.16} C ${-radius * 0.98} ${-radius * 0.45}, ${-radius * 0.62} ${-radius * 0.98}, 0 ${-radius * 0.98} Z`;
+  const tail = isWhite
+    ? `<path class="cat-tail cat-tail-white" d="M ${-radius * 0.72} ${radius * 0.3} C ${-radius * 1.38} ${-radius * 0.58}, ${-radius * 0.56} ${-radius * 1.7}, ${radius * 0.34} ${-radius * 1.25} C ${radius * 1.02} ${-radius * 0.9}, ${radius * 0.7} ${-radius * 0.18}, ${radius * 0.2} ${radius * 0.05}" stroke="${bodyFur}" />`
+    : `<path class="cat-tail cat-tail-black" d="M ${-radius * 0.66} ${radius * 0.35} C ${-radius * 1.38} ${-radius * 0.1}, ${-radius * 1.12} ${-radius * 1.02}, ${-radius * 0.36} ${-radius * 1.04}" stroke="${bodyFur}" />`;
+  const furDetail = isWhite
+    ? `
+      <path class="cat-fluff" d="M ${-radius * 0.92} ${-radius * 0.2} L ${-radius * 1.2} ${-radius * 0.02} L ${-radius * 0.98} ${radius * 0.18} L ${-radius * 1.2} ${radius * 0.38} L ${-radius * 0.9} ${radius * 0.48} M ${radius * 0.92} ${-radius * 0.2} L ${radius * 1.2} ${-radius * 0.02} L ${radius * 0.98} ${radius * 0.18} L ${radius * 1.2} ${radius * 0.38} L ${radius * 0.9} ${radius * 0.48}" />
+      <path class="cat-fur-streak" d="M ${-radius * 0.22} ${-radius * 0.88} C ${-radius * 0.06} ${-radius * 0.68}, ${-radius * 0.02} ${-radius * 0.52}, 0 ${-radius * 0.36} M ${radius * 0.16} ${-radius * 0.9} C ${radius * 0.05} ${-radius * 0.64}, ${radius * 0.12} ${-radius * 0.48}, ${radius * 0.28} ${-radius * 0.34}" />
+    `
+    : `
+      <path class="cat-short-fur" d="M ${-radius * 0.34} ${-radius * 0.9} L ${-radius * 0.15} ${-radius * 1.1} L ${radius * 0.02} ${-radius * 0.9} L ${radius * 0.2} ${-radius * 1.08} L ${radius * 0.38} ${-radius * 0.84}" />
+      <path class="cat-fur-streak cat-black-streak" d="M ${-radius * 0.56} ${-radius * 0.42} C ${-radius * 0.28} ${-radius * 0.52}, ${-radius * 0.06} ${-radius * 0.55}, ${radius * 0.18} ${-radius * 0.5} M ${-radius * 0.62} ${radius * 0.18} C ${-radius * 0.34} ${radius * 0.05}, ${-radius * 0.08} ${radius * 0.02}, ${radius * 0.18} ${radius * 0.1}" />
+    `;
 
   return `
     <g class="cat-token cat-${side} ${selected ? "is-selected" : ""}" transform="translate(${x} ${y})">
-      <circle class="cat-shadow" cx="0" cy="${radius * 0.18}" r="${radius * 0.98}" />
+      <ellipse class="cat-shadow" cx="0" cy="${radius * 0.54}" rx="${radius * 1.2}" ry="${radius * 0.58}" />
+      ${tail}
+      <ellipse class="cat-body" cx="${-radius * 0.16}" cy="${radius * 0.42}" rx="${radius * 0.82}" ry="${radius * 0.48}" fill="${bodyFur}" stroke="${softStroke}" transform="rotate(${isWhite ? -7 : -12})" />
+      <ellipse class="cat-paw" cx="${-radius * 0.48}" cy="${radius * 0.8}" rx="${radius * 0.23}" ry="${radius * 0.13}" fill="${fur}" stroke="${softStroke}" />
+      <ellipse class="cat-paw" cx="${radius * 0.42}" cy="${radius * 0.82}" rx="${radius * 0.23}" ry="${radius * 0.13}" fill="${fur}" stroke="${softStroke}" />
       <path class="cat-ear" d="M ${-earX} ${earY} L ${-radius * 0.96} ${-radius * 1.42} L ${-radius * 0.25} ${-radius * 0.95} Z" fill="${fur}" stroke="${stroke}" />
       <path class="cat-ear" d="M ${earX} ${earY} L ${radius * 0.96} ${-radius * 1.42} L ${radius * 0.25} ${-radius * 0.95} Z" fill="${fur}" stroke="${stroke}" />
       <path class="cat-ear-inner" d="M ${-earX} ${earY - radius * 0.06} L ${-radius * 0.78} ${-radius * 1.18} L ${-radius * 0.38} ${-radius * 0.9} Z" fill="${inner}" />
       <path class="cat-ear-inner" d="M ${earX} ${earY - radius * 0.06} L ${radius * 0.78} ${-radius * 1.18} L ${radius * 0.38} ${-radius * 0.9} Z" fill="${inner}" />
-      <circle class="cat-face" cx="0" cy="0" r="${radius}" fill="${fur}" stroke="${stroke}" />
-      ${hair}
-      <ellipse class="cat-eye" cx="${-radius * 0.35}" cy="${-radius * 0.15}" rx="${radius * 0.13}" ry="${radius * 0.2}" fill="${eye}" />
-      <ellipse class="cat-eye" cx="${radius * 0.35}" cy="${-radius * 0.15}" rx="${radius * 0.13}" ry="${radius * 0.2}" fill="${eye}" />
-      <line class="cat-pupil" x1="${-radius * 0.35}" y1="${-radius * 0.28}" x2="${-radius * 0.35}" y2="${radius * 0.02}" />
-      <line class="cat-pupil" x1="${radius * 0.35}" y1="${-radius * 0.28}" x2="${radius * 0.35}" y2="${radius * 0.02}" />
-      <path class="cat-nose" d="M ${-radius * 0.08} ${radius * 0.16} Q 0 ${radius * 0.24} ${radius * 0.08} ${radius * 0.16}" />
-      <path class="cat-mouth" d="M 0 ${radius * 0.24} Q ${-radius * 0.14} ${radius * 0.38} ${-radius * 0.3} ${radius * 0.28} M 0 ${radius * 0.24} Q ${radius * 0.14} ${radius * 0.38} ${radius * 0.3} ${radius * 0.28}" />
-      <path class="cat-whisker" d="M ${-radius * 0.18} ${radius * 0.15} H ${-radius * 0.82} M ${-radius * 0.16} ${radius * 0.28} L ${-radius * 0.78} ${radius * 0.48} M ${radius * 0.18} ${radius * 0.15} H ${radius * 0.82} M ${radius * 0.16} ${radius * 0.28} L ${radius * 0.78} ${radius * 0.48}" />
+      <path class="cat-face" d="${faceShape}" fill="${fur}" stroke="${stroke}" />
+      ${furDetail}
+      <ellipse class="cat-muzzle" cx="${-radius * 0.18}" cy="${radius * 0.25}" rx="${radius * 0.24}" ry="${radius * 0.18}" fill="${muzzle}" />
+      <ellipse class="cat-muzzle" cx="${radius * 0.18}" cy="${radius * 0.25}" rx="${radius * 0.24}" ry="${radius * 0.18}" fill="${muzzle}" />
+      <ellipse class="cat-eye" cx="${-radius * 0.34}" cy="${-radius * 0.16}" rx="${radius * 0.18}" ry="${radius * 0.24}" fill="${eye}" />
+      <ellipse class="cat-eye" cx="${radius * 0.34}" cy="${-radius * 0.16}" rx="${radius * 0.18}" ry="${radius * 0.24}" fill="${eye}" />
+      <ellipse class="cat-pupil" cx="${-radius * 0.34}" cy="${-radius * 0.15}" rx="${radius * 0.045}" ry="${radius * 0.17}" />
+      <ellipse class="cat-pupil" cx="${radius * 0.34}" cy="${-radius * 0.15}" rx="${radius * 0.045}" ry="${radius * 0.17}" />
+      <circle class="cat-eye-shine" cx="${-radius * 0.39}" cy="${-radius * 0.25}" r="${radius * 0.055}" />
+      <circle class="cat-eye-shine" cx="${radius * 0.29}" cy="${-radius * 0.25}" r="${radius * 0.055}" />
+      <path class="cat-nose" d="M ${-radius * 0.1} ${radius * 0.14} Q 0 ${radius * 0.24} ${radius * 0.1} ${radius * 0.14} Q 0 ${radius * 0.08} ${-radius * 0.1} ${radius * 0.14}" fill="${nose}" />
+      <path class="cat-mouth" d="M 0 ${radius * 0.24} Q ${-radius * 0.12} ${radius * 0.4} ${-radius * 0.3} ${radius * 0.34} M 0 ${radius * 0.24} Q ${radius * 0.12} ${radius * 0.4} ${radius * 0.3} ${radius * 0.34}" />
+      <ellipse class="cat-open-mouth" cx="0" cy="${radius * 0.46}" rx="${radius * 0.11}" ry="${radius * 0.14}" />
+      <path class="cat-whisker" d="M ${-radius * 0.18} ${radius * 0.15} L ${-radius * 0.9} ${radius * 0.02} M ${-radius * 0.16} ${radius * 0.3} L ${-radius * 0.86} ${radius * 0.48} M ${radius * 0.18} ${radius * 0.15} L ${radius * 0.9} ${radius * 0.02} M ${radius * 0.16} ${radius * 0.3} L ${radius * 0.86} ${radius * 0.48}" />
       ${label ? `<text class="piece-label" y="${radius * 1.72}">${escapeHtml(label)}</text>` : ""}
     </g>
   `;

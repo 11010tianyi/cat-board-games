@@ -237,19 +237,51 @@ h1 {
   fill: rgba(0, 0, 0, 0.28);
 }
 
-.cat-face,
-.cat-ear {
-  stroke-width: 2;
+.cat-tail {
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 5;
 }
 
-.cat-hair,
+.cat-tail-white {
+  filter: drop-shadow(0 0 2px rgba(255, 255, 255, 0.5));
+}
+
+.cat-tail-black {
+  filter: drop-shadow(0 0 2px rgba(255, 216, 77, 0.2));
+}
+
+.cat-face,
+.cat-ear,
+.cat-body,
+.cat-paw {
+  stroke-width: 1.8;
+  stroke-linejoin: round;
+}
+
 .cat-short-fur,
+.cat-fluff,
+.cat-fur-streak,
 .cat-whisker,
 .cat-mouth {
   fill: none;
   stroke: currentColor;
-  stroke-width: 1.8;
+  stroke-width: 1.55;
   stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.cat-fluff {
+  stroke-width: 1.25;
+}
+
+.cat-fur-streak {
+  opacity: 0.72;
+}
+
+.cat-black-streak {
+  opacity: 0.9;
 }
 
 .cat-black {
@@ -257,18 +289,34 @@ h1 {
 }
 
 .cat-white {
-  color: #a97945;
+  color: #b88654;
+}
+
+.cat-eye {
+  stroke: rgba(22, 22, 22, 0.7);
+  stroke-width: 1.1;
+}
+
+.cat-muzzle {
+  opacity: 0.86;
 }
 
 .cat-pupil {
-  stroke: #161616;
-  stroke-width: 1.7;
-  stroke-linecap: round;
+  fill: #141414;
+}
+
+.cat-eye-shine {
+  fill: rgba(255, 255, 255, 0.92);
 }
 
 .cat-nose {
-  fill: #d87a7a;
   stroke: none;
+}
+
+.cat-open-mouth {
+  fill: #c15a5a;
+  stroke: rgba(40, 20, 18, 0.55);
+  stroke-width: 0.8;
 }
 
 .cat-token.is-selected .cat-face {
