@@ -1,7 +1,7 @@
 import "./styles.css";
 
 type Player = "black" | "white";
-type CatStyle = "drawn" | "photo";
+type CatStyle = "drawn" | "photo" | "family";
 type GameId = "gomoku" | "go" | "xiangqi" | "jump" | "tycoon";
 type Point = { row: number; col: number };
 
@@ -38,9 +38,15 @@ const playerMeta: Record<Player, { name: string; title: string; eye: string }> =
   },
 };
 
-const photoCatAssets: Record<Player, string> = {
-  black: `${import.meta.env.BASE_URL}assets/cats/black-photo-token.png`,
-  white: `${import.meta.env.BASE_URL}assets/cats/white-photo-token.png`,
+const photoCatAssets: Record<Exclude<CatStyle, "drawn">, Record<Player, string>> = {
+  photo: {
+    black: `${import.meta.env.BASE_URL}assets/cats/black-photo-token.png`,
+    white: `${import.meta.env.BASE_URL}assets/cats/white-photo-token.png`,
+  },
+  family: {
+    black: `${import.meta.env.BASE_URL}assets/cats/black-cartoonwithfamily-photo-token.png`,
+    white: `${import.meta.env.BASE_URL}assets/cats/white-cartoonwithfamily-photo-token.png`,
+  },
 };
 
 const other = (player: Player): Player => (player === "black" ? "white" : "black");
@@ -103,9 +109,10 @@ function catStylePicker() {
   return `
     <div class="option-group">
       <p class="option-title">猫咪形象</p>
-      <div class="segmented-control">
+      <div class="segmented-control cat-style-control">
         ${optionButton("catStyle:drawn", "手绘猫", appState.catStyle === "drawn")}
         ${optionButton("catStyle:photo", "扣图猫", appState.catStyle === "photo")}
+        ${optionButton("catStyle:family", "全家福猫", appState.catStyle === "family")}
       </div>
     </div>
   `;
@@ -169,7 +176,7 @@ function catToken(side: Player, x: number, y: number, radius: number, label = ""
   `;
 }
 
-function photoCatToken(side: Player, x: number, y: number, radius: number, label = "", selected = false) {
+function photoCatToken(side: Player, x: number, y: number, radius: number, label = "", selected = false, style: Exclude<CatStyle, "drawn"> = "photo") {
   const size = radius * 3.05;
   const photoX = x - size / 2;
   const photoY = y - size / 2 - radius * 0.05;
@@ -179,7 +186,7 @@ function photoCatToken(side: Player, x: number, y: number, radius: number, label
     <g class="cat-token cat-photo-token cat-${side} ${selected ? "is-selected" : ""}" transform="translate(0 0)">
       <ellipse class="cat-shadow" cx="${x}" cy="${y + radius * 0.42}" rx="${radius * 1.18}" ry="${radius * 0.48}" />
       <circle class="cat-photo-bg" cx="${x}" cy="${y}" r="${radius * 1.06}" fill="${fill}" stroke="${stroke}" />
-      <image class="cat-photo-image" href="${photoCatAssets[side]}" x="${photoX}" y="${photoY}" width="${size}" height="${size}" preserveAspectRatio="xMidYMid meet" />
+      <image class="cat-photo-image" href="${photoCatAssets[style][side]}" x="${photoX}" y="${photoY}" width="${size}" height="${size}" preserveAspectRatio="xMidYMid meet" />
       ${selected ? `<circle class="cat-photo-selected" cx="${x}" cy="${y}" r="${radius * 1.2}" />` : ""}
       ${label ? `<text class="piece-label" y="${y + radius * 1.72}" x="${x}">${escapeHtml(label)}</text>` : ""}
     </g>
@@ -187,7 +194,7 @@ function photoCatToken(side: Player, x: number, y: number, radius: number, label
 }
 
 function catPiece(side: Player, x: number, y: number, radius: number, label = "", selected = false) {
-  return appState.catStyle === "photo" ? photoCatToken(side, x, y, radius, label, selected) : catToken(side, x, y, radius, label, selected);
+  return appState.catStyle === "drawn" ? catToken(side, x, y, radius, label, selected) : photoCatToken(side, x, y, radius, label, selected, appState.catStyle);
 }
 
 function catIcon(side: Player) {
@@ -1542,7 +1549,10 @@ appRoot.addEventListener("click", (event) => {
   if (actionButton?.dataset.action && !actionButton.disabled) {
     const action = actionButton.dataset.action;
     if (action === "reset") resetActive();
-    else if (action === "catStyle:drawn" || action === "catStyle:photo") appState.catStyle = action.endsWith("photo") ? "photo" : "drawn";
+    else if (action.startsWith("catStyle:")) {
+      const style = action.split(":")[1] as CatStyle;
+      if (style === "drawn" || style === "photo" || style === "family") appState.catStyle = style;
+    }
     else activeGame().handleAction(activeState(), action);
     renderApp();
     return;

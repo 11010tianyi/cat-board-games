@@ -574,6 +574,10 @@ h1 {
   gap: 6px;
 }
 
+.cat-style-control {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
 .option-button {
   min-height: 36px;
   padding: 6px 8px;
