@@ -319,8 +319,40 @@ h1 {
   stroke-width: 0.8;
 }
 
+.cat-photo-bg {
+  filter: drop-shadow(0 3px 4px rgba(0, 0, 0, 0.34));
+  stroke-width: 2.2;
+}
+
+.cat-photo-image {
+  pointer-events: none;
+}
+
+.cat-photo-selected,
+.winning-ring,
+.last-move-ring {
+  fill: none;
+  pointer-events: none;
+}
+
+.cat-photo-selected {
+  stroke: #ffef9d;
+  stroke-width: 3;
+}
+
 .cat-token.is-selected .cat-face {
   stroke-width: 3.5;
+}
+
+.last-move-ring {
+  stroke: rgba(255, 239, 157, 0.78);
+  stroke-width: 3;
+  stroke-dasharray: 4 4;
+}
+
+.winning-ring {
+  stroke: #f04f5f;
+  stroke-width: 4;
 }
 
 .piece-label {
@@ -517,6 +549,52 @@ h1 {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 8px;
+}
+
+.option-group {
+  display: grid;
+  grid-column: 1 / -1;
+  gap: 7px;
+  padding: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  background: rgba(12, 13, 15, 0.38);
+}
+
+.option-title {
+  margin: 0;
+  color: #d7c9b8;
+  font-size: 0.78rem;
+  font-weight: 900;
+}
+
+.segmented-control {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.option-button {
+  min-height: 36px;
+  padding: 6px 8px;
+  color: #efe5d3;
+  border: 1px solid rgba(255, 255, 255, 0.13);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.08);
+  cursor: pointer;
+  font-weight: 900;
+}
+
+.option-button:hover,
+.option-button:focus-visible {
+  border-color: rgba(255, 216, 77, 0.65);
+  outline: none;
+}
+
+.option-button.is-active {
+  color: #161616;
+  border-color: #ffd84d;
+  background: #ffd84d;
 }
 
 .control-button {

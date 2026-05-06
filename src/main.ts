@@ -1,6 +1,7 @@
 import "./styles.css";
 
 type Player = "black" | "white";
+type CatStyle = "drawn" | "photo";
 type GameId = "gomoku" | "go" | "xiangqi" | "jump" | "tycoon";
 type Point = { row: number; col: number };
 
@@ -35,6 +36,11 @@ const playerMeta: Record<Player, { name: string; title: string; eye: string }> =
     title: "白色淡黄眼睛长毛田园猫",
     eye: "#f4df86",
   },
+};
+
+const photoCatAssets: Record<Player, string> = {
+  black: `${import.meta.env.BASE_URL}assets/cats/black-photo-token.png`,
+  white: `${import.meta.env.BASE_URL}assets/cats/white-photo-token.png`,
 };
 
 const other = (player: Player): Player => (player === "black" ? "white" : "black");
@@ -82,6 +88,26 @@ function iconButton(action: string, icon: string, label: string, disabled = fals
       <span class="button-icon" aria-hidden="true">${icon}</span>
       <span>${escapeHtml(label)}</span>
     </button>
+  `;
+}
+
+function optionButton(action: string, label: string, active: boolean) {
+  return `
+    <button class="option-button ${active ? "is-active" : ""}" data-action="${action}" aria-pressed="${active}">
+      ${escapeHtml(label)}
+    </button>
+  `;
+}
+
+function catStylePicker() {
+  return `
+    <div class="option-group">
+      <p class="option-title">猫咪形象</p>
+      <div class="segmented-control">
+        ${optionButton("catStyle:drawn", "手绘猫", appState.catStyle === "drawn")}
+        ${optionButton("catStyle:photo", "扣图猫", appState.catStyle === "photo")}
+      </div>
+    </div>
   `;
 }
 
@@ -143,10 +169,31 @@ function catToken(side: Player, x: number, y: number, radius: number, label = ""
   `;
 }
 
+function photoCatToken(side: Player, x: number, y: number, radius: number, label = "", selected = false) {
+  const size = radius * 3.05;
+  const photoX = x - size / 2;
+  const photoY = y - size / 2 - radius * 0.05;
+  const stroke = side === "black" ? "#ffd84d" : "#fff1c1";
+  const fill = side === "black" ? "#141414" : "#fff8ea";
+  return `
+    <g class="cat-token cat-photo-token cat-${side} ${selected ? "is-selected" : ""}" transform="translate(0 0)">
+      <ellipse class="cat-shadow" cx="${x}" cy="${y + radius * 0.42}" rx="${radius * 1.18}" ry="${radius * 0.48}" />
+      <circle class="cat-photo-bg" cx="${x}" cy="${y}" r="${radius * 1.06}" fill="${fill}" stroke="${stroke}" />
+      <image class="cat-photo-image" href="${photoCatAssets[side]}" x="${photoX}" y="${photoY}" width="${size}" height="${size}" preserveAspectRatio="xMidYMid meet" />
+      ${selected ? `<circle class="cat-photo-selected" cx="${x}" cy="${y}" r="${radius * 1.2}" />` : ""}
+      ${label ? `<text class="piece-label" y="${y + radius * 1.72}" x="${x}">${escapeHtml(label)}</text>` : ""}
+    </g>
+  `;
+}
+
+function catPiece(side: Player, x: number, y: number, radius: number, label = "", selected = false) {
+  return appState.catStyle === "photo" ? photoCatToken(side, x, y, radius, label, selected) : catToken(side, x, y, radius, label, selected);
+}
+
 function catIcon(side: Player) {
   return `
     <svg class="cat-icon" viewBox="0 0 40 44" aria-hidden="true">
-      ${catToken(side, 20, 22, 12)}
+      ${catPiece(side, 20, 22, 12)}
     </svg>
   `;
 }
@@ -154,8 +201,8 @@ function catIcon(side: Player) {
 function duoCatIcon() {
   return `
     <svg class="brand-cats" viewBox="0 0 82 60" aria-hidden="true">
-      ${catToken("black", 28, 34, 15)}
-      ${catToken("white", 56, 34, 15)}
+      ${catPiece("black", 28, 34, 15)}
+      ${catPiece("white", 56, 34, 15)}
     </svg>
   `;
 }
@@ -206,6 +253,10 @@ type GomokuState = {
   board: Array<Player | null>;
   cursor: Point;
   turn: Player;
+  mode: "ai" | "local";
+  history: Array<Point & { player: Player }>;
+  lastMove: Point | null;
+  winningLine: Point[];
   winner: Player | null;
   message: string;
   moves: number;
@@ -218,32 +269,166 @@ function createGomoku(): GomokuState {
     board: Array<Player | null>(gomokuSize * gomokuSize).fill(null),
     cursor: { row: 7, col: 7 },
     turn: "black",
+    mode: "ai",
+    history: [],
+    lastMove: null,
+    winningLine: [],
     winner: null,
-    message: "黑猫先手。",
+    message: "人机模式，黑猫先手。",
     moves: 0,
   };
 }
 
+const gomokuDirs = [
+  [1, 0],
+  [0, 1],
+  [1, 1],
+  [1, -1],
+] as const;
+
+function gomokuWinningLine(state: GomokuState, row: number, col: number, player: Player) {
+  for (const [dr, dc] of gomokuDirs) {
+    const line = [{ row, col }];
+    let nr = row + dr;
+    let nc = col + dc;
+    while (inBoard(nr, nc, gomokuSize) && state.board[boardIndex(nr, nc, gomokuSize)] === player) {
+      line.push({ row: nr, col: nc });
+      nr += dr;
+      nc += dc;
+    }
+    nr = row - dr;
+    nc = col - dc;
+    while (inBoard(nr, nc, gomokuSize) && state.board[boardIndex(nr, nc, gomokuSize)] === player) {
+      line.unshift({ row: nr, col: nc });
+      nr -= dr;
+      nc -= dc;
+    }
+    if (line.length >= 5) return line;
+  }
+  return [];
+}
+
 function gomokuWon(state: GomokuState, row: number, col: number, player: Player) {
-  const directions = [
-    [1, 0],
-    [0, 1],
-    [1, 1],
-    [1, -1],
-  ];
-  return directions.some(([dr, dc]) => {
-    let count = 1;
-    for (const sign of [-1, 1]) {
-      let nr = row + dr * sign;
-      let nc = col + dc * sign;
-      while (inBoard(nr, nc, gomokuSize) && state.board[boardIndex(nr, nc, gomokuSize)] === player) {
-        count += 1;
-        nr += dr * sign;
-        nc += dc * sign;
+  return gomokuWinningLine(state, row, col, player).length >= 5;
+}
+
+function gomokuCountLine(state: GomokuState, row: number, col: number, dr: number, dc: number, player: Player) {
+  let count = 0;
+  let nr = row + dr;
+  let nc = col + dc;
+  while (inBoard(nr, nc, gomokuSize) && state.board[boardIndex(nr, nc, gomokuSize)] === player) {
+    count += 1;
+    nr += dr;
+    nc += dc;
+  }
+  return {
+    count,
+    open: inBoard(nr, nc, gomokuSize) && state.board[boardIndex(nr, nc, gomokuSize)] === null,
+  };
+}
+
+function gomokuScorePoint(state: GomokuState, row: number, col: number, player: Player) {
+  let total = 0;
+  for (const [dr, dc] of gomokuDirs) {
+    const forward = gomokuCountLine(state, row, col, dr, dc, player);
+    const backward = gomokuCountLine(state, row, col, -dr, -dc, player);
+    const length = 1 + forward.count + backward.count;
+    const openEnds = Number(forward.open) + Number(backward.open);
+    if (length >= 5) total += 100000;
+    else if (length === 4 && openEnds === 2) total += 18000;
+    else if (length === 4 && openEnds === 1) total += 4800;
+    else if (length === 3 && openEnds === 2) total += 2300;
+    else if (length === 3 && openEnds === 1) total += 620;
+    else if (length === 2 && openEnds === 2) total += 260;
+    else if (length === 2 && openEnds === 1) total += 80;
+    else if (openEnds === 2) total += 24;
+  }
+  return total;
+}
+
+function gomokuCandidates(state: GomokuState) {
+  if (!state.history.length) return [{ row: 7, col: 7 }];
+  const seen = new Set<string>();
+  const candidates: Point[] = [];
+  for (const move of state.history) {
+    for (let dr = -2; dr <= 2; dr += 1) {
+      for (let dc = -2; dc <= 2; dc += 1) {
+        const row = move.row + dr;
+        const col = move.col + dc;
+        const key = cellKey(row, col);
+        if (!inBoard(row, col, gomokuSize) || state.board[boardIndex(row, col, gomokuSize)] || seen.has(key)) continue;
+        seen.add(key);
+        candidates.push({ row, col });
       }
     }
-    return count >= 5;
+  }
+  return candidates.length ? candidates : [{ row: 7, col: 7 }];
+}
+
+function gomokuChooseAiMove(state: GomokuState) {
+  // Ported from the standalone gomoku.html AI: win, block, then score nearby candidates.
+  const candidates = gomokuCandidates(state);
+  let best: Point | null = null;
+  let bestScore = -Infinity;
+  for (const point of candidates) {
+    const index = boardIndex(point.row, point.col, gomokuSize);
+    state.board[index] = "white";
+    if (gomokuWon(state, point.row, point.col, "white")) {
+      state.board[index] = null;
+      return point;
+    }
+    state.board[index] = null;
+
+    state.board[index] = "black";
+    if (gomokuWon(state, point.row, point.col, "black")) {
+      state.board[index] = null;
+      return point;
+    }
+    state.board[index] = null;
+
+    const attack = gomokuScorePoint(state, point.row, point.col, "white");
+    const defense = gomokuScorePoint(state, point.row, point.col, "black");
+    const center = 18 - Math.hypot(point.row - 7, point.col - 7);
+    const score = attack + defense * 0.92 + center;
+    if (score > bestScore) {
+      bestScore = score;
+      best = point;
+    }
+  }
+  return best;
+}
+
+function gomokuApplyMove(state: GomokuState, row: number, col: number, player: Player) {
+  const index = boardIndex(row, col, gomokuSize);
+  if (state.board[index] || state.winner) return false;
+  state.board[index] = player;
+  state.history.push({ row, col, player });
+  state.lastMove = { row, col };
+  state.moves += 1;
+  const line = gomokuWinningLine(state, row, col, player);
+  if (line.length >= 5) {
+    state.winner = player;
+    state.winningLine = line;
+    state.message = `${playerMeta[player].name}五子连线。`;
+  } else if (state.moves === gomokuSize * gomokuSize) {
+    state.message = "棋盘已满，平局。";
+  }
+  return true;
+}
+
+function gomokuSetMode(state: GomokuState, mode: "ai" | "local") {
+  if (state.mode === mode) return;
+  const fresh = createGomoku();
+  Object.assign(state, fresh, {
+    mode,
+    message: mode === "ai" ? "人机模式，黑猫先手。" : "双人模式，黑猫先手。",
   });
+}
+
+function gomokuTurnLabel(state: GomokuState) {
+  if (state.winner) return `${playerMeta[state.winner].name}已经连五。`;
+  if (state.mode === "ai") return "你执黑，白猫 AI 应手。";
+  return `${playerMeta[state.turn].name}落子。`;
 }
 
 function gomokuPlace(state: GomokuState, row: number, col: number) {
@@ -256,19 +441,26 @@ function gomokuPlace(state: GomokuState, row: number, col: number) {
     state.message = "这个交叉点已经有猫了。";
     return;
   }
-  state.board[index] = state.turn;
-  state.moves += 1;
-  if (gomokuWon(state, row, col, state.turn)) {
-    state.winner = state.turn;
-    state.message = `${playerMeta[state.turn].name}五子连线。`;
+  if (state.mode === "ai") {
+    if (state.turn !== "black") return;
+    if (!gomokuApplyMove(state, row, col, "black")) return;
+    if (state.winner || state.moves === gomokuSize * gomokuSize) return;
+    state.turn = "white";
+    const aiMove = gomokuChooseAiMove(state);
+    if (aiMove) {
+      gomokuApplyMove(state, aiMove.row, aiMove.col, "white");
+      if (!state.winner && state.moves < gomokuSize * gomokuSize) state.message = `白猫 AI 落在 ${String.fromCharCode(65 + aiMove.col)}${aiMove.row + 1}，轮到黑猫。`;
+    }
+    if (!state.winner) state.turn = "black";
     return;
   }
-  if (state.moves === gomokuSize * gomokuSize) {
-    state.message = "棋盘已满，平局。";
-    return;
+
+  const player = state.turn;
+  if (!gomokuApplyMove(state, row, col, player)) return;
+  if (!state.winner && state.moves < gomokuSize * gomokuSize) {
+    state.turn = other(player);
+    state.message = gomokuTurnLabel(state);
   }
-  state.turn = other(state.turn);
-  state.message = `${playerMeta[state.turn].name}落子。`;
 }
 
 function renderGomoku(state: GomokuState) {
@@ -293,7 +485,11 @@ function renderGomoku(state: GomokuState) {
       const y = pad + row * step;
       cells.push(`<circle class="svg-hotspot" data-cell="${row},${col}" cx="${x}" cy="${y}" r="${step * 0.48}" />`);
       const piece = state.board[boardIndex(row, col, gomokuSize)];
-      if (piece) pieces.push(catToken(piece, x, y, 12.5));
+      const isLast = state.lastMove?.row === row && state.lastMove.col === col;
+      const isWin = state.winningLine.some((point) => point.row === row && point.col === col);
+      if (isLast) pieces.push(`<circle class="last-move-ring" cx="${x}" cy="${y}" r="18" />`);
+      if (isWin) pieces.push(`<circle class="winning-ring" cx="${x}" cy="${y}" r="20" />`);
+      if (piece) pieces.push(catPiece(piece, x, y, 12.5));
     }
   }
   const cursor = renderCursor(pad + state.cursor.col * step, pad + state.cursor.row * step, 17);
@@ -313,9 +509,21 @@ const gomokuGame: Game<GomokuState> = {
   badge: "15路",
   create: createGomoku,
   render: renderGomoku,
-  controls: () => iconButton("reset", "↻", "重开"),
+  controls: (state) => `
+    <div class="option-group controls-wide">
+      <p class="option-title">五子棋模式</p>
+      <div class="segmented-control">
+        ${optionButton("gomokuMode:ai", "和 AI 下", state.mode === "ai")}
+        ${optionButton("gomokuMode:local", "真人对弈", state.mode === "local")}
+      </div>
+    </div>
+    ${iconButton("reset", "↻", "重开")}
+  `,
   handleCell: gomokuPlace,
-  handleAction: () => undefined,
+  handleAction: (state, action) => {
+    if (action === "gomokuMode:ai") gomokuSetMode(state, "ai");
+    if (action === "gomokuMode:local") gomokuSetMode(state, "local");
+  },
   handleKey: (state, event) => {
     if (moveCursor(state.cursor, event, gomokuSize, gomokuSize)) return true;
     if (event.key === "Enter" || event.key === " ") {
@@ -473,7 +681,7 @@ function renderGo(state: GoState) {
       const y = pad + row * step;
       cells.push(`<circle class="svg-hotspot" data-cell="${row},${col}" cx="${x}" cy="${y}" r="${step * 0.46}" />`);
       const piece = state.board[boardIndex(row, col, goSize)];
-      if (piece) pieces.push(catToken(piece, x, y, 17));
+      if (piece) pieces.push(catPiece(piece, x, y, 17));
     }
   }
   const score = goScore(state);
@@ -713,7 +921,7 @@ function renderXiangqi(state: XiangqiState) {
     .map((piece) => {
       const x = pad + piece.col * step;
       const y = pad + piece.row * step;
-      return catToken(piece.side, x, y, 20, xiangqiLabels[piece.side][piece.kind], state.selected === piece.id);
+      return catPiece(piece.side, x, y, 20, xiangqiLabels[piece.side][piece.kind], state.selected === piece.id);
     })
     .join("");
   return svgBoard("xiangqi-svg", "象棋", width, height, `
@@ -891,7 +1099,7 @@ function renderJump(state: JumpState) {
       const zone = row <= 2 ? " top-zone" : row >= 6 ? " bottom-zone" : "";
       cells.push(`<circle class="jump-cell${zone}" data-cell="${row},${col}" cx="${x}" cy="${y}" r="18" />`);
       const owner = state.pieces[cellKey(row, col)];
-      if (owner) pieces.push(catToken(owner, x, y, 16, "", state.selected === cellKey(row, col)));
+      if (owner) pieces.push(catPiece(owner, x, y, 16, "", state.selected === cellKey(row, col)));
     }
   }
   const cursorPoint = jumpPoint(state.cursor.row, state.cursor.col);
@@ -1143,7 +1351,7 @@ function renderTycoon(state: TycoonState) {
       const pos = tycoonTilePosition(player.position);
       const sameSpot = state.players[0].position === state.players[1].position;
       const shift = sameSpot ? (index === 0 ? -16 : 16) : 0;
-      return catToken(player.side, pos.x + pos.w / 2 + shift, pos.y + pos.h / 2 + 14, 16);
+      return catPiece(player.side, pos.x + pos.w / 2 + shift, pos.y + pos.h / 2 + 14, 16);
     })
     .join("");
   const dice = state.dice ? `${state.dice[0]} + ${state.dice[1]}` : "待投";
@@ -1216,8 +1424,9 @@ const gameDefs: { [K in GameId]: Game<GameStateMap[K]> } = {
 
 const gameOrder: GameId[] = ["gomoku", "go", "xiangqi", "jump", "tycoon"];
 
-const appState: { active: GameId; states: GameStateMap } = {
+const appState: { active: GameId; catStyle: CatStyle; states: GameStateMap } = {
   active: "gomoku",
+  catStyle: "drawn",
   states: {
     gomoku: gomokuGame.create(),
     go: goGame.create(),
@@ -1248,7 +1457,13 @@ function getMessage() {
 
 function resetActive() {
   const id = appState.active;
-  appState.states[id] = gameDefs[id].create() as never;
+  const previous = appState.states[id];
+  const next = gameDefs[id].create();
+  if (id === "gomoku") {
+    (next as GomokuState).mode = (previous as GomokuState).mode;
+    (next as GomokuState).message = (next as GomokuState).mode === "ai" ? "人机模式，黑猫先手。" : "双人模式，黑猫先手。";
+  }
+  appState.states[id] = next as never;
 }
 
 function renderApp() {
@@ -1295,6 +1510,7 @@ function renderApp() {
             <p class="status-message">${escapeHtml(getMessage())}</p>
           </div>
           <div class="controls">
+            ${catStylePicker()}
             ${game.controls(state)}
           </div>
           <div class="cat-legend">
@@ -1324,8 +1540,10 @@ appRoot.addEventListener("click", (event) => {
   }
   const actionButton = closestElement(event.target, "[data-action]") as HTMLButtonElement | null;
   if (actionButton?.dataset.action && !actionButton.disabled) {
-    if (actionButton.dataset.action === "reset") resetActive();
-    else activeGame().handleAction(activeState(), actionButton.dataset.action);
+    const action = actionButton.dataset.action;
+    if (action === "reset") resetActive();
+    else if (action === "catStyle:drawn" || action === "catStyle:photo") appState.catStyle = action.endsWith("photo") ? "photo" : "drawn";
+    else activeGame().handleAction(activeState(), action);
     renderApp();
     return;
   }
