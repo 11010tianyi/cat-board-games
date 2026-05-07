@@ -34,3 +34,53 @@ bun run build
 GitHub Pages 会在 `main` 分支推送后自动部署到：
 
 https://11010tianyi.github.io/cat-board-games/
+
+## 移动端打包
+
+项目已接入 Capacitor：
+
+- Android 包名：`com.tianyi.catboardgames`
+- iOS Bundle Identifier：`com.tianyi.catboardgames`
+- App 名称：`猫猫棋局`
+- 移动端 WebView 构建使用 `bun run build:mobile`，会把资源路径改成 App 可加载的相对路径。
+
+常用命令：
+
+```bash
+bun run mobile:sync
+bun run android:apk
+bun run ios:sync
+bun run ios:open
+```
+
+本机如未安装 Android SDK，可以使用 GitHub Actions 的 `Build Mobile Apps` workflow 生成 debug APK artifact。
+
+### Android 本机打包
+
+需要 JDK 17+ 和 Android SDK 36。工具链就绪后运行：
+
+```bash
+bun run android:apk
+```
+
+APK 输出位置：
+
+```text
+android/app/build/outputs/apk/debug/app-debug.apk
+```
+
+### iOS 打包到最后一步
+
+需要完整 Xcode 和 Apple Developer 账号。资源同步后运行：
+
+```bash
+bun run ios:open
+```
+
+在 Xcode 中完成：
+
+1. 选择 `App` target。
+2. 打开 `Signing & Capabilities`。
+3. 选择自己的 Team，确认 Bundle Identifier 是 `com.tianyi.catboardgames`。
+4. 连接真机或选择 `Any iOS Device`。
+5. 真机安装点 `Run`；上架/导出点 `Product > Archive`，再按 Organizer 提示 Distribute App。
