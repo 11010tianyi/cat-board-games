@@ -3,6 +3,7 @@ import "./styles.css";
 type Player = "black" | "white";
 type CatStyle = "drawn" | "photo" | "family";
 type GameId = "gomoku" | "go" | "xiangqi" | "jump" | "tycoon";
+type PlayMode = "ai" | "local";
 type Point = { row: number; col: number };
 
 type Game<S> = {
@@ -113,6 +114,18 @@ function catStylePicker() {
         ${optionButton("catStyle:drawn", "手绘猫", appState.catStyle === "drawn")}
         ${optionButton("catStyle:photo", "扣图猫", appState.catStyle === "photo")}
         ${optionButton("catStyle:family", "全家福猫", appState.catStyle === "family")}
+      </div>
+    </div>
+  `;
+}
+
+function modePicker(title: string, actionPrefix: string, mode: PlayMode) {
+  return `
+    <div class="option-group controls-wide">
+      <p class="option-title">${escapeHtml(title)}</p>
+      <div class="segmented-control">
+        ${optionButton(`${actionPrefix}:ai`, "和 AI 下", mode === "ai")}
+        ${optionButton(`${actionPrefix}:local`, "真人对弈", mode === "local")}
       </div>
     </div>
   `;
@@ -260,7 +273,7 @@ type GomokuState = {
   board: Array<Player | null>;
   cursor: Point;
   turn: Player;
-  mode: "ai" | "local";
+  mode: PlayMode;
   history: Array<Point & { player: Player }>;
   lastMove: Point | null;
   winningLine: Point[];
@@ -423,13 +436,14 @@ function gomokuApplyMove(state: GomokuState, row: number, col: number, player: P
   return true;
 }
 
-function gomokuSetMode(state: GomokuState, mode: "ai" | "local") {
+function gomokuSetMode(state: GomokuState, mode: PlayMode) {
   if (state.mode === mode) return;
   const fresh = createGomoku();
   Object.assign(state, fresh, {
     mode,
     message: mode === "ai" ? "人机模式，黑猫先手。" : "双人模式，黑猫先手。",
   });
+  clearUndo("gomoku");
 }
 
 function gomokuTurnLabel(state: GomokuState) {
@@ -517,13 +531,7 @@ const gomokuGame: Game<GomokuState> = {
   create: createGomoku,
   render: renderGomoku,
   controls: (state) => `
-    <div class="option-group controls-wide">
-      <p class="option-title">五子棋模式</p>
-      <div class="segmented-control">
-        ${optionButton("gomokuMode:ai", "和 AI 下", state.mode === "ai")}
-        ${optionButton("gomokuMode:local", "真人对弈", state.mode === "local")}
-      </div>
-    </div>
+    ${modePicker("五子棋模式", "gomokuMode", state.mode)}
     ${iconButton("reset", "↻", "重开")}
   `,
   handleCell: gomokuPlace,
@@ -548,6 +556,7 @@ type GoState = {
   captures: Record<Player, number>;
   cursor: Point;
   turn: Player;
+  mode: PlayMode;
   passCount: number;
   winner: Player | null;
   message: string;
@@ -561,9 +570,10 @@ function createGo(): GoState {
     captures: { black: 0, white: 0 },
     cursor: { row: 4, col: 4 },
     turn: "black",
+    mode: "ai",
     passCount: 0,
     winner: null,
-    message: "9路围棋，黑猫先手。",
+    message: "人机模式，黑猫先手，你执黑。",
   };
 }
 
@@ -614,18 +624,14 @@ function goScore(state: GoState) {
   return { black, white };
 }
 
-function goPlace(state: GoState, row: number, col: number) {
-  if (state.winner) return;
+function goTryMove(state: GoState, row: number, col: number, player: Player) {
   const index = boardIndex(row, col, goSize);
-  if (state.board[index]) {
-    state.message = "这里已经有猫子。";
-    return;
-  }
+  if (state.board[index]) return null;
   const nextBoard = [...state.board];
-  nextBoard[index] = state.turn;
+  nextBoard[index] = player;
   let captured = 0;
   for (const next of goNeighbors(row, col)) {
-    if (nextBoard[boardIndex(next.row, next.col, goSize)] !== other(state.turn)) continue;
+    if (nextBoard[boardIndex(next.row, next.col, goSize)] !== other(player)) continue;
     const group = goCollectGroup(nextBoard, next.row, next.col);
     if (goLiberties(nextBoard, group) === 0) {
       captured += group.length;
@@ -633,18 +639,43 @@ function goPlace(state: GoState, row: number, col: number) {
     }
   }
   const ownGroup = goCollectGroup(nextBoard, row, col);
-  if (goLiberties(nextBoard, ownGroup) === 0) {
-    state.message = "这里没有气，不能自杀。";
-    return;
-  }
-  state.board = nextBoard;
-  state.captures[state.turn] += captured;
-  state.passCount = 0;
-  state.message = captured ? `${playerMeta[state.turn].name}提走 ${captured} 子。` : `${playerMeta[other(state.turn)].name}落子。`;
-  state.turn = other(state.turn);
+  const liberties = goLiberties(nextBoard, ownGroup);
+  if (liberties === 0) return null;
+  return { board: nextBoard, captured, liberties };
 }
 
-function goPass(state: GoState) {
+function goApplyMove(state: GoState, row: number, col: number, player: Player) {
+  const result = goTryMove(state, row, col, player);
+  if (!result) return false;
+  state.board = result.board;
+  state.captures[player] += result.captured;
+  state.passCount = 0;
+  state.turn = other(player);
+  state.message = result.captured ? `${playerMeta[player].name}提走 ${result.captured} 子。` : `${playerMeta[state.turn].name}落子。`;
+  return true;
+}
+
+function goChooseAiMove(state: GoState, player: Player) {
+  let best: Point | null = null;
+  let bestScore = -Infinity;
+  for (let row = 0; row < goSize; row += 1) {
+    for (let col = 0; col < goSize; col += 1) {
+      const result = goTryMove(state, row, col, player);
+      if (!result) continue;
+      const center = 10 - Math.hypot(row - 4, col - 4);
+      const pressure = goNeighbors(row, col).filter((next) => state.board[boardIndex(next.row, next.col, goSize)] === other(player)).length;
+      const friendly = goNeighbors(row, col).filter((next) => state.board[boardIndex(next.row, next.col, goSize)] === player).length;
+      const score = result.captured * 120 + result.liberties * 10 + pressure * 7 + friendly * 5 + center;
+      if (score > bestScore) {
+        bestScore = score;
+        best = { row, col };
+      }
+    }
+  }
+  return best;
+}
+
+function goPassFor(state: GoState, player: Player) {
   if (state.winner) return;
   state.passCount += 1;
   if (state.passCount >= 2) {
@@ -657,8 +688,62 @@ function goPass(state: GoState) {
         : `${playerMeta[winner].name} ${score.black}:${score.white} 获胜。`;
     return;
   }
-  state.message = `${playerMeta[state.turn].name}停着。`;
-  state.turn = other(state.turn);
+  state.turn = other(player);
+  state.message = `${playerMeta[player].name}停着，${playerMeta[state.turn].name}落子。`;
+}
+
+function goAiTurn(state: GoState) {
+  if (state.mode !== "ai" || state.winner || state.turn !== "white") return;
+  const move = goChooseAiMove(state, "white");
+  if (!move) {
+    goPassFor(state, "white");
+    if (!state.winner) state.message = "白猫 AI 停着，轮到黑猫。";
+    return;
+  }
+  const applied = goApplyMove(state, move.row, move.col, "white");
+  if (applied && !state.winner) {
+    state.message = `白猫 AI 落在 ${String.fromCharCode(65 + move.col)}${move.row + 1}，轮到黑猫。`;
+  }
+}
+
+function goSetMode(state: GoState, mode: PlayMode) {
+  if (state.mode === mode) return;
+  const fresh = createGo();
+  Object.assign(state, fresh, {
+    mode,
+    message: mode === "ai" ? "人机模式，黑猫先手，你执黑。" : "真人对弈，黑猫先手。",
+  });
+  clearUndo("go");
+}
+
+function goPlace(state: GoState, row: number, col: number) {
+  if (state.winner) return;
+  const index = boardIndex(row, col, goSize);
+  if (state.board[index]) {
+    state.message = "这里已经有猫子。";
+    return;
+  }
+  if (state.mode === "ai" && state.turn !== "black") {
+    state.message = "白猫 AI 正在应手。";
+    return;
+  }
+  const player = state.turn;
+  if (!goApplyMove(state, row, col, player)) {
+    state.message = "这里没有气，不能自杀。";
+    return;
+  }
+  if (state.mode === "ai") goAiTurn(state);
+}
+
+function goPass(state: GoState) {
+  if (state.winner) return;
+  if (state.mode === "ai" && state.turn !== "black") {
+    state.message = "白猫 AI 正在应手。";
+    return;
+  }
+  const player = state.turn;
+  goPassFor(state, player);
+  if (state.mode === "ai") goAiTurn(state);
 }
 
 function renderGo(state: GoState) {
@@ -709,9 +794,11 @@ const goGame: Game<GoState> = {
   badge: "9路",
   create: createGo,
   render: renderGo,
-  controls: () => `${iconButton("pass", "⏭", "停着")}${iconButton("reset", "↻", "重开")}`,
+  controls: (state) => `${modePicker("围棋模式", "goMode", state.mode)}${iconButton("pass", "⏭", "停着")}${iconButton("reset", "↻", "重开")}`,
   handleCell: goPlace,
   handleAction: (state, action) => {
+    if (action === "goMode:ai") goSetMode(state, "ai");
+    if (action === "goMode:local") goSetMode(state, "local");
     if (action === "pass") goPass(state);
   },
   handleKey: (state, event) => {
@@ -744,6 +831,7 @@ type XiangqiState = {
   selected: string | null;
   cursor: Point;
   turn: Player;
+  mode: PlayMode;
   winner: Player | null;
   message: string;
 };
@@ -786,8 +874,9 @@ function createXiangqi(): XiangqiState {
     selected: null,
     cursor: { row: 9, col: 4 },
     turn: "white",
+    mode: "ai",
     winner: null,
-    message: "白猫先行。",
+    message: "人机模式，你执白猫先行。",
   };
 }
 
@@ -856,8 +945,98 @@ function xiangqiLegal(state: XiangqiState, piece: XiangqiPiece, row: number, col
   return crossed && dr === 0 && adc === 1;
 }
 
+const xiangqiValues: Record<XiangqiKind, number> = {
+  G: 10000,
+  R: 520,
+  C: 460,
+  H: 360,
+  E: 170,
+  A: 150,
+  S: 90,
+};
+
+function xiangqiTurnMessage(state: XiangqiState) {
+  if (state.winner) return `${playerMeta[state.winner].name}已经胜出。`;
+  if (state.mode === "ai") return state.turn === "white" ? "你执白猫行棋。" : "黑猫 AI 行棋。";
+  return `${playerMeta[state.turn].name}行棋。`;
+}
+
+function xiangqiApplyMove(state: XiangqiState, piece: XiangqiPiece, row: number, col: number) {
+  const target = xiangqiPieceAt(state, row, col);
+  if (!xiangqiLegal(state, piece, row, col)) return false;
+  if (target) {
+    state.pieces = state.pieces.filter((next) => next.id !== target.id);
+    if (target.kind === "G") {
+      state.winner = piece.side;
+      state.message = `${playerMeta[piece.side].name}将军得手。`;
+    }
+  }
+  piece.row = row;
+  piece.col = col;
+  state.selected = null;
+  if (!state.winner) {
+    state.turn = other(piece.side);
+    state.message = xiangqiTurnMessage(state);
+  }
+  return true;
+}
+
+function xiangqiMoveScore(state: XiangqiState, piece: XiangqiPiece, row: number, col: number) {
+  const target = xiangqiPieceAt(state, row, col);
+  const advancement = piece.side === "black" ? row : 9 - row;
+  const center = 5 - Math.abs(col - 4);
+  const soldierBonus = piece.kind === "S" ? advancement * 8 : 0;
+  return (target ? xiangqiValues[target.kind] * 12 : 0) + xiangqiValues[piece.kind] * 0.05 + advancement * 4 + center + soldierBonus;
+}
+
+function xiangqiLegalMoves(state: XiangqiState, side: Player) {
+  const moves: Array<{ piece: XiangqiPiece; row: number; col: number; score: number }> = [];
+  for (const piece of state.pieces) {
+    if (piece.side !== side) continue;
+    for (let row = 0; row < 10; row += 1) {
+      for (let col = 0; col < 9; col += 1) {
+        if (!xiangqiLegal(state, piece, row, col)) continue;
+        moves.push({ piece, row, col, score: xiangqiMoveScore(state, piece, row, col) });
+      }
+    }
+  }
+  return moves;
+}
+
+function xiangqiAiTurn(state: XiangqiState) {
+  if (state.mode !== "ai" || state.winner || state.turn !== "black") return;
+  const move = xiangqiLegalMoves(state, "black").sort((a, b) => b.score - a.score)[0];
+  if (!move) {
+    state.winner = "white";
+    state.message = "黑猫 AI 无棋可走，白猫胜。";
+    return;
+  }
+  const label = xiangqiLabels[move.piece.side][move.piece.kind];
+  const captured = xiangqiPieceAt(state, move.row, move.col);
+  xiangqiApplyMove(state, move.piece, move.row, move.col);
+  if (!state.winner) {
+    state.message = captured
+      ? `黑猫 AI 用${label}吃子，轮到白猫。`
+      : `黑猫 AI 走${label}到 ${move.row + 1}-${move.col + 1}，轮到白猫。`;
+  }
+}
+
+function xiangqiSetMode(state: XiangqiState, mode: PlayMode) {
+  if (state.mode === mode) return;
+  const fresh = createXiangqi();
+  Object.assign(state, fresh, {
+    mode,
+    message: mode === "ai" ? "人机模式，你执白猫先行。" : "真人对弈，白猫先行。",
+  });
+  clearUndo("xiangqi");
+}
+
 function xiangqiCell(state: XiangqiState, row: number, col: number) {
   if (state.winner) return;
+  if (state.mode === "ai" && state.turn !== "white") {
+    state.message = "黑猫 AI 正在行棋。";
+    return;
+  }
   const target = xiangqiPieceAt(state, row, col);
   if (!state.selected) {
     if (target?.side === state.turn) {
@@ -880,20 +1059,7 @@ function xiangqiCell(state: XiangqiState, row: number, col: number) {
     state.message = "这一步走法不成立。";
     return;
   }
-  if (target) {
-    state.pieces = state.pieces.filter((piece) => piece.id !== target.id);
-    if (target.kind === "G") {
-      state.winner = state.turn;
-      state.message = `${playerMeta[state.turn].name}将军得手。`;
-    }
-  }
-  moving.row = row;
-  moving.col = col;
-  state.selected = null;
-  if (!state.winner) {
-    state.turn = other(state.turn);
-    state.message = `${playerMeta[state.turn].name}行棋。`;
-  }
+  if (xiangqiApplyMove(state, moving, row, col)) xiangqiAiTurn(state);
 }
 
 function renderXiangqi(state: XiangqiState) {
@@ -947,9 +1113,12 @@ const xiangqiGame: Game<XiangqiState> = {
   badge: "九宫",
   create: createXiangqi,
   render: renderXiangqi,
-  controls: () => iconButton("reset", "↻", "重开"),
+  controls: (state) => `${modePicker("象棋模式", "xiangqiMode", state.mode)}${iconButton("reset", "↻", "重开")}`,
   handleCell: xiangqiCell,
-  handleAction: () => undefined,
+  handleAction: (state, action) => {
+    if (action === "xiangqiMode:ai") xiangqiSetMode(state, "ai");
+    if (action === "xiangqiMode:local") xiangqiSetMode(state, "local");
+  },
   handleKey: (state, event) => {
     if (moveCursor(state.cursor, event, 10, 9)) return true;
     if (event.key === "Enter" || event.key === " ") {
@@ -959,7 +1128,7 @@ const xiangqiGame: Game<XiangqiState> = {
     }
     if (event.key === "Escape") {
       state.selected = null;
-      state.message = `${playerMeta[state.turn].name}行棋。`;
+      state.message = xiangqiTurnMessage(state);
       event.preventDefault();
       return true;
     }
@@ -973,6 +1142,7 @@ type JumpState = {
   cursor: Point;
   selected: string | null;
   turn: Player;
+  mode: PlayMode;
   mustContinue: boolean;
   winner: Player | null;
   message: string;
@@ -1001,9 +1171,10 @@ function createJump(): JumpState {
     cursor: { row: 4, col: 4 },
     selected: null,
     turn: "black",
+    mode: "ai",
     mustContinue: false,
     winner: null,
-    message: "黑猫先跳。",
+    message: "人机模式，黑猫先跳，你执黑。",
   };
 }
 
@@ -1036,8 +1207,112 @@ function jumpEndTurn(state: JumpState) {
   state.message = `${playerMeta[state.turn].name}跳棋。`;
 }
 
+type JumpMove = {
+  from: string;
+  to: string;
+  isJump: boolean;
+  score: number;
+};
+
+function jumpMoveScore(side: Player, from: Point, to: Point, isJump: boolean) {
+  const progress = side === "black" ? to.row - from.row : from.row - to.row;
+  const homeBonus = side === "black" ? Math.max(0, to.row - 5) * 10 : Math.max(0, 3 - to.row) * 10;
+  const center = 5 - Math.abs(to.col - 4);
+  return (isJump ? 52 : 12) + progress * 18 + homeBonus + center;
+}
+
+function jumpLegalMovesFor(state: JumpState, side: Player, fromOnly?: string, jumpsOnly = false) {
+  const moves: JumpMove[] = [];
+  const entries = Object.entries(state.pieces).filter(([key, owner]) => owner === side && (!fromOnly || key === fromOnly));
+  for (const [fromKey] of entries) {
+    const from = parseCell(fromKey);
+    for (const dir of jumpDirs) {
+      const adjacentRow = from.row + dir.row;
+      const adjacentCol = from.col + dir.col;
+      const adjacentKey = cellKey(adjacentRow, adjacentCol);
+      if (!jumpsOnly && jumpValid(adjacentRow, adjacentCol) && !state.pieces[adjacentKey]) {
+        const to = { row: adjacentRow, col: adjacentCol };
+        moves.push({
+          from: fromKey,
+          to: adjacentKey,
+          isJump: false,
+          score: jumpMoveScore(side, from, to, false),
+        });
+      }
+
+      const landingRow = from.row + dir.row * 2;
+      const landingCol = from.col + dir.col * 2;
+      const landingKey = cellKey(landingRow, landingCol);
+      if (jumpValid(landingRow, landingCol) && state.pieces[adjacentKey] && !state.pieces[landingKey]) {
+        const to = { row: landingRow, col: landingCol };
+        moves.push({
+          from: fromKey,
+          to: landingKey,
+          isJump: true,
+          score: jumpMoveScore(side, from, to, true),
+        });
+      }
+    }
+  }
+  return moves;
+}
+
+function jumpApplyMove(state: JumpState, move: JumpMove, side: Player) {
+  state.pieces[move.to] = side;
+  delete state.pieces[move.from];
+  const winner = jumpCheckWinner(state);
+  if (winner) {
+    state.winner = winner;
+    state.message = `${playerMeta[winner].name}抵达对岸。`;
+    state.selected = null;
+    state.mustContinue = false;
+    return true;
+  }
+  return false;
+}
+
+function jumpAiTurn(state: JumpState) {
+  if (state.mode !== "ai" || state.winner || state.turn !== "white") return;
+  let fromOnly: string | undefined;
+  let lastMove: JumpMove | null = null;
+  for (let guard = 0; guard < 8; guard += 1) {
+    const moves = jumpLegalMovesFor(state, "white", fromOnly, Boolean(fromOnly)).sort((a, b) => b.score - a.score);
+    const move = moves[0];
+    if (!move) break;
+    lastMove = move;
+    const won = jumpApplyMove(state, move, "white");
+    if (won) return;
+    fromOnly = move.isJump && jumpHasJump(state, move.to) ? move.to : undefined;
+    if (!fromOnly) break;
+  }
+  if (!lastMove) {
+    state.winner = "black";
+    state.message = "白猫 AI 无路可跳，黑猫胜。";
+    return;
+  }
+  state.selected = null;
+  state.mustContinue = false;
+  state.turn = "black";
+  const to = parseCell(lastMove.to);
+  state.message = `白猫 AI 跳到 ${to.row + 1}-${to.col + 1}，轮到黑猫。`;
+}
+
+function jumpSetMode(state: JumpState, mode: PlayMode) {
+  if (state.mode === mode) return;
+  const fresh = createJump();
+  Object.assign(state, fresh, {
+    mode,
+    message: mode === "ai" ? "人机模式，黑猫先跳，你执黑。" : "真人对弈，黑猫先跳。",
+  });
+  clearUndo("jump");
+}
+
 function jumpCell(state: JumpState, row: number, col: number) {
   if (state.winner || !jumpValid(row, col)) return;
+  if (state.mode === "ai" && state.turn !== "black") {
+    state.message = "白猫 AI 正在跳棋。";
+    return;
+  }
   const key = cellKey(row, col);
   const owner = state.pieces[key];
   if (!state.selected) {
@@ -1086,6 +1361,7 @@ function jumpCell(state: JumpState, row: number, col: number) {
     return;
   }
   jumpEndTurn(state);
+  jumpAiTurn(state);
 }
 
 function jumpPoint(row: number, col: number) {
@@ -1125,10 +1401,15 @@ const jumpGame: Game<JumpState> = {
   badge: "连跳",
   create: createJump,
   render: renderJump,
-  controls: (state) => `${iconButton("endJump", "✓", "结束回合", !state.mustContinue)}${iconButton("reset", "↻", "重开")}`,
+  controls: (state) => `${modePicker("跳跳棋模式", "jumpMode", state.mode)}${iconButton("endJump", "✓", "结束回合", !state.mustContinue)}${iconButton("reset", "↻", "重开")}`,
   handleCell: jumpCell,
   handleAction: (state, action) => {
-    if (action === "endJump" && state.mustContinue) jumpEndTurn(state);
+    if (action === "jumpMode:ai") jumpSetMode(state, "ai");
+    if (action === "jumpMode:local") jumpSetMode(state, "local");
+    if (action === "endJump" && state.mustContinue) {
+      jumpEndTurn(state);
+      jumpAiTurn(state);
+    }
   },
   handleKey: (state, event) => {
     if (moveCursor(state.cursor, event, jumpSize, jumpSize, jumpValid)) return true;
@@ -1139,6 +1420,7 @@ const jumpGame: Game<JumpState> = {
     }
     if (event.key.toLowerCase() === "n" && state.mustContinue) {
       jumpEndTurn(state);
+      jumpAiTurn(state);
       event.preventDefault();
       return true;
     }
@@ -1164,6 +1446,7 @@ type TycoonState = {
   active: 0 | 1;
   owners: Record<number, Player>;
   dice: [number, number] | null;
+  mode: PlayMode;
   phase: "roll" | "decision" | "end" | "gameover";
   pendingTile: number | null;
   winner: Player | null;
@@ -1208,11 +1491,12 @@ function createTycoon(): TycoonState {
     active: 0,
     owners: {},
     dice: null,
+    mode: "ai",
     phase: "roll",
     pendingTile: null,
     winner: null,
     turnNo: 0,
-    message: "黑猫先投骰。",
+    message: "人机模式，黑猫先投骰，你执黑。",
     log: [],
   };
 }
@@ -1319,12 +1603,61 @@ function tycoonBuy(state: TycoonState) {
   tycoonCheckWinner(state);
 }
 
+function tycoonDeclineBuy(state: TycoonState) {
+  if (state.phase !== "decision" || state.pendingTile === null) return;
+  const player = tycoonActive(state);
+  const tile = tycoonTiles[state.pendingTile];
+  state.pendingTile = null;
+  state.phase = "end";
+  state.message = `${playerMeta[player.side].name}暂不购买 ${tile.name}。`;
+  tycoonPushLog(state, `${playerMeta[player.side].name}略过 ${tile.name}。`);
+}
+
+function tycoonShouldAiBuy(state: TycoonState) {
+  if (state.pendingTile === null) return false;
+  const player = tycoonActive(state);
+  const tile = tycoonTiles[state.pendingTile];
+  const price = tile.price ?? 0;
+  const rent = tile.rent ?? 0;
+  if (!price || player.money < price) return false;
+  return player.money - price >= 100 || rent / price >= 0.18;
+}
+
+function tycoonIsGameOver(state: TycoonState) {
+  return state.phase === "gameover";
+}
+
+function tycoonAiTurn(state: TycoonState) {
+  if (state.mode !== "ai" || tycoonIsGameOver(state) || tycoonActive(state).side !== "white") return;
+  for (let guard = 0; guard < 8 && !tycoonIsGameOver(state) && tycoonActive(state).side === "white"; guard += 1) {
+    if (state.phase === "roll") tycoonRoll(state);
+    else if (state.phase === "decision") {
+      if (tycoonShouldAiBuy(state)) tycoonBuy(state);
+      else tycoonDeclineBuy(state);
+    } else if (state.phase === "end") tycoonEnd(state);
+  }
+  if (!tycoonIsGameOver(state) && tycoonActive(state).side === "black") {
+    state.message = "白猫 AI 完成回合，轮到黑猫投骰。";
+  }
+}
+
 function tycoonEnd(state: TycoonState) {
   if (state.phase === "gameover" || state.phase === "roll") return;
   state.pendingTile = null;
   state.active = state.active === 0 ? 1 : 0;
   state.phase = "roll";
   state.message = `${playerMeta[tycoonActive(state).side].name}投骰。`;
+  tycoonAiTurn(state);
+}
+
+function tycoonSetMode(state: TycoonState, mode: PlayMode) {
+  if (state.mode === mode) return;
+  const fresh = createTycoon();
+  Object.assign(state, fresh, {
+    mode,
+    message: mode === "ai" ? "人机模式，黑猫先投骰，你执黑。" : "真人对弈，黑猫先投骰。",
+  });
+  clearUndo("tycoon");
 }
 
 function tycoonTilePosition(index: number) {
@@ -1385,9 +1718,11 @@ const tycoonGame: Game<TycoonState> = {
   create: createTycoon,
   render: renderTycoon,
   controls: (state) =>
-    `${iconButton("roll", "⚂", "投骰", state.phase !== "roll")}${iconButton("buy", "◆", "购买", state.phase !== "decision")}${iconButton("end", "▶", "换猫", state.phase === "roll" || state.phase === "gameover")}${iconButton("reset", "↻", "重开")}`,
+    `${modePicker("大富翁模式", "tycoonMode", state.mode)}${iconButton("roll", "⚂", "投骰", state.phase !== "roll")}${iconButton("buy", "◆", "购买", state.phase !== "decision")}${iconButton("end", "▶", "换猫", state.phase === "roll" || state.phase === "gameover")}${iconButton("reset", "↻", "重开")}`,
   handleCell: () => undefined,
   handleAction: (state, action) => {
+    if (action === "tycoonMode:ai") tycoonSetMode(state, "ai");
+    if (action === "tycoonMode:local") tycoonSetMode(state, "local");
     if (action === "roll") tycoonRoll(state);
     if (action === "buy") tycoonBuy(state);
     if (action === "end") tycoonEnd(state);
@@ -1420,6 +1755,7 @@ type GameStateMap = {
   jump: JumpState;
   tycoon: TycoonState;
 };
+type UndoStacks = { [K in GameId]: string[] };
 
 const gameDefs: { [K in GameId]: Game<GameStateMap[K]> } = {
   gomoku: gomokuGame,
@@ -1431,7 +1767,7 @@ const gameDefs: { [K in GameId]: Game<GameStateMap[K]> } = {
 
 const gameOrder: GameId[] = ["gomoku", "go", "xiangqi", "jump", "tycoon"];
 
-const appState: { active: GameId; catStyle: CatStyle; states: GameStateMap } = {
+const appState: { active: GameId; catStyle: CatStyle; states: GameStateMap; undoStacks: UndoStacks } = {
   active: "gomoku",
   catStyle: "drawn",
   states: {
@@ -1440,6 +1776,13 @@ const appState: { active: GameId; catStyle: CatStyle; states: GameStateMap } = {
     xiangqi: xiangqiGame.create(),
     jump: jumpGame.create(),
     tycoon: tycoonGame.create(),
+  },
+  undoStacks: {
+    gomoku: [],
+    go: [],
+    xiangqi: [],
+    jump: [],
+    tycoon: [],
   },
 };
 
@@ -1462,13 +1805,74 @@ function getMessage() {
   return String(state.message ?? "");
 }
 
+function clearUndo(id: GameId) {
+  appState.undoStacks[id] = [];
+}
+
+function snapshotState(id: GameId) {
+  const state = JSON.parse(JSON.stringify(appState.states[id]));
+  if (id === "xiangqi") state.selected = null;
+  if (id === "jump" && !state.mustContinue) state.selected = null;
+  return JSON.stringify(state);
+}
+
+function materialSnapshot(id: GameId) {
+  const state = JSON.parse(JSON.stringify(appState.states[id]));
+  delete state.cursor;
+  delete state.message;
+  if (id === "xiangqi") delete state.selected;
+  if (id === "jump" && !state.mustContinue) delete state.selected;
+  return JSON.stringify(state);
+}
+
+function pushUndoSnapshot(id: GameId, snapshot: string, beforeMaterial: string) {
+  if (beforeMaterial === materialSnapshot(id)) return;
+  const stack = appState.undoStacks[id];
+  stack.push(snapshot);
+  if (stack.length > 80) stack.shift();
+}
+
+function mutateActiveWithUndo(mutator: () => void) {
+  const id = appState.active;
+  const before = snapshotState(id);
+  const beforeMaterial = materialSnapshot(id);
+  mutator();
+  pushUndoSnapshot(id, before, beforeMaterial);
+}
+
+function undoActive() {
+  const id = appState.active;
+  const snapshot = appState.undoStacks[id].pop();
+  if (!snapshot) {
+    const state = activeState();
+    if ("message" in state) state.message = "没有可悔的棋。";
+    return;
+  }
+  appState.states[id] = JSON.parse(snapshot) as never;
+  const state = activeState();
+  if ("message" in state) state.message = "已悔棋。";
+}
+
+function hasActiveUndo() {
+  return appState.undoStacks[appState.active].length > 0;
+}
+
+function introMessage(id: GameId, mode: PlayMode) {
+  if (id === "gomoku") return mode === "ai" ? "人机模式，黑猫先手。" : "双人模式，黑猫先手。";
+  if (id === "go") return mode === "ai" ? "人机模式，黑猫先手，你执黑。" : "真人对弈，黑猫先手。";
+  if (id === "xiangqi") return mode === "ai" ? "人机模式，你执白猫先行。" : "真人对弈，白猫先行。";
+  if (id === "jump") return mode === "ai" ? "人机模式，黑猫先跳，你执黑。" : "真人对弈，黑猫先跳。";
+  return mode === "ai" ? "人机模式，黑猫先投骰，你执黑。" : "真人对弈，黑猫先投骰。";
+}
+
 function resetActive() {
   const id = appState.active;
   const previous = appState.states[id];
   const next = gameDefs[id].create();
-  if (id === "gomoku") {
-    (next as GomokuState).mode = (previous as GomokuState).mode;
-    (next as GomokuState).message = (next as GomokuState).mode === "ai" ? "人机模式，黑猫先手。" : "双人模式，黑猫先手。";
+  if ("mode" in previous && "mode" in next) {
+    const mode = previous.mode as PlayMode;
+    (next as { mode: PlayMode; message: string }).mode = mode;
+    (next as { mode: PlayMode; message: string }).message = introMessage(id, mode);
   }
   appState.states[id] = next as never;
 }
@@ -1518,6 +1922,7 @@ function renderApp() {
           </div>
           <div class="controls">
             ${catStylePicker()}
+            ${iconButton("undo", "↶", "悔棋", !hasActiveUndo())}
             ${game.controls(state)}
           </div>
           <div class="cat-legend">
@@ -1548,12 +1953,13 @@ appRoot.addEventListener("click", (event) => {
   const actionButton = closestElement(event.target, "[data-action]") as HTMLButtonElement | null;
   if (actionButton?.dataset.action && !actionButton.disabled) {
     const action = actionButton.dataset.action;
-    if (action === "reset") resetActive();
+    if (action === "undo") undoActive();
+    else if (action === "reset") mutateActiveWithUndo(resetActive);
     else if (action.startsWith("catStyle:")) {
       const style = action.split(":")[1] as CatStyle;
       if (style === "drawn" || style === "photo" || style === "family") appState.catStyle = style;
-    }
-    else activeGame().handleAction(activeState(), action);
+    } else if (action.includes("Mode:")) activeGame().handleAction(activeState(), action);
+    else mutateActiveWithUndo(() => activeGame().handleAction(activeState(), action));
     renderApp();
     return;
   }
@@ -1562,14 +1968,20 @@ appRoot.addEventListener("click", (event) => {
     const { row, col } = parseCell(cell.dataset.cell);
     const state = activeState();
     if ("cursor" in state) state.cursor = { row, col };
-    activeGame().handleCell(state, row, col);
+    mutateActiveWithUndo(() => activeGame().handleCell(state, row, col));
     renderApp();
   }
 });
 
 document.addEventListener("keydown", (event) => {
-  if (event.metaKey || event.ctrlKey || event.altKey) return;
   const key = event.key.toLowerCase();
+  if ((event.metaKey || event.ctrlKey) && key === "z") {
+    undoActive();
+    event.preventDefault();
+    renderApp();
+    return;
+  }
+  if (event.metaKey || event.ctrlKey || event.altKey) return;
   const number = Number(key);
   if (number >= 1 && number <= gameOrder.length) {
     appState.active = gameOrder[number - 1];
@@ -1578,12 +1990,31 @@ document.addEventListener("keydown", (event) => {
     return;
   }
   if (key === "r") {
-    resetActive();
+    mutateActiveWithUndo(resetActive);
     event.preventDefault();
     renderApp();
     return;
   }
-  if (activeGame().handleKey(activeState(), event)) renderApp();
+  if (key === "u" || key === "z") {
+    undoActive();
+    event.preventDefault();
+    renderApp();
+    return;
+  }
+  if (event.key.startsWith("Arrow")) {
+    if (activeGame().handleKey(activeState(), event)) renderApp();
+    return;
+  }
+  if (mutateKeyWithUndo(event)) renderApp();
 });
+
+function mutateKeyWithUndo(event: KeyboardEvent) {
+  const id = appState.active;
+  const before = snapshotState(id);
+  const beforeMaterial = materialSnapshot(id);
+  const handled = activeGame().handleKey(activeState(), event);
+  if (handled) pushUndoSnapshot(id, before, beforeMaterial);
+  return handled;
+}
 
 renderApp();
