@@ -14,7 +14,8 @@
     "android:apk": "bun run android:sync && cd android && ./gradlew assembleDebug",
     "ios:sync": "bun run build:mobile && cap sync ios",
     "ios:open": "bun run ios:sync && cap open ios",
-    "preview": "vite preview --host 0.0.0.0"
+    "preview": "vite preview --host 0.0.0.0",
+    "test": "node --experimental-strip-types --import ./scripts/test-preload.mjs --test scripts/playable.test.ts"
   },
   "keywords": [
     "bun",
