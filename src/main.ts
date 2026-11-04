@@ -18,13 +18,12 @@ type Game<S> = {
   handleKey: (state: S, event: KeyboardEvent) => boolean;
 };
 
-const app = document.querySelector<HTMLDivElement>("#app");
+const appRoot: HTMLDivElement | null =
+  typeof document === "undefined" ? null : document.querySelector<HTMLDivElement>("#app");
 
-if (!app) {
+if (typeof document !== "undefined" && !appRoot) {
   throw new Error("App root #app not found");
 }
-
-const appRoot = app;
 
 const playerMeta: Record<Player, { name: string; title: string; eye: string }> = {
   black: {
@@ -39,14 +38,16 @@ const playerMeta: Record<Player, { name: string; title: string; eye: string }> =
   },
 };
 
+const assetBase = import.meta.env?.BASE_URL ?? "/cat-board-games/";
+
 const photoCatAssets: Record<Exclude<CatStyle, "drawn">, Record<Player, string>> = {
   photo: {
-    black: `${import.meta.env.BASE_URL}assets/cats/black-photo-token.png`,
-    white: `${import.meta.env.BASE_URL}assets/cats/white-photo-token.png`,
+    black: `${assetBase}assets/cats/black-photo-token.png`,
+    white: `${assetBase}assets/cats/white-photo-token.png`,
   },
   family: {
-    black: `${import.meta.env.BASE_URL}assets/cats/black-cartoonwithfamily-photo-token.png`,
-    white: `${import.meta.env.BASE_URL}assets/cats/white-cartoonwithfamily-photo-token.png`,
+    black: `${assetBase}assets/cats/black-cartoonwithfamily-photo-token.png`,
+    white: `${assetBase}assets/cats/white-cartoonwithfamily-photo-token.png`,
   },
 };
 
@@ -366,8 +367,20 @@ function gomokuScorePoint(state: GomokuState, row: number, col: number, player: 
   return total;
 }
 
+function gomokuEmptyCells(state: GomokuState) {
+  const empty: Point[] = [];
+  for (let row = 0; row < gomokuSize; row += 1) {
+    for (let col = 0; col < gomokuSize; col += 1) {
+      if (!state.board[boardIndex(row, col, gomokuSize)]) empty.push({ row, col });
+    }
+  }
+  return empty;
+}
+
 function gomokuCandidates(state: GomokuState) {
-  if (!state.history.length) return [{ row: 7, col: 7 }];
+  if (!state.history.length) {
+    return state.board[boardIndex(7, 7, gomokuSize)] ? gomokuEmptyCells(state) : [{ row: 7, col: 7 }];
+  }
   const seen = new Set<string>();
   const candidates: Point[] = [];
   for (const move of state.history) {
@@ -382,30 +395,33 @@ function gomokuCandidates(state: GomokuState) {
       }
     }
   }
-  return candidates.length ? candidates : [{ row: 7, col: 7 }];
+  // Nearby squares can all be filled. Never fall back onto an occupied tengen.
+  return candidates.length ? candidates : gomokuEmptyCells(state);
+}
+
+function gomokuWithStone<T>(state: GomokuState, row: number, col: number, player: Player, read: () => T) {
+  const index = boardIndex(row, col, gomokuSize);
+  const previous = state.board[index];
+  state.board[index] = player;
+  try {
+    return read();
+  } finally {
+    state.board[index] = previous;
+  }
 }
 
 function gomokuChooseAiMove(state: GomokuState) {
-  // Ported from the standalone gomoku.html AI: win, block, then score nearby candidates.
+  // Win first across every candidate, then block, then score. Never stop at the first threat.
   const candidates = gomokuCandidates(state);
+  for (const point of candidates) {
+    if (gomokuWithStone(state, point.row, point.col, "white", () => gomokuWon(state, point.row, point.col, "white"))) return point;
+  }
+  for (const point of candidates) {
+    if (gomokuWithStone(state, point.row, point.col, "black", () => gomokuWon(state, point.row, point.col, "black"))) return point;
+  }
   let best: Point | null = null;
   let bestScore = -Infinity;
   for (const point of candidates) {
-    const index = boardIndex(point.row, point.col, gomokuSize);
-    state.board[index] = "white";
-    if (gomokuWon(state, point.row, point.col, "white")) {
-      state.board[index] = null;
-      return point;
-    }
-    state.board[index] = null;
-
-    state.board[index] = "black";
-    if (gomokuWon(state, point.row, point.col, "black")) {
-      state.board[index] = null;
-      return point;
-    }
-    state.board[index] = null;
-
     const attack = gomokuScorePoint(state, point.row, point.col, "white");
     const defense = gomokuScorePoint(state, point.row, point.col, "black");
     const center = 18 - Math.hypot(point.row - 7, point.col - 7);
@@ -558,6 +574,8 @@ type GoState = {
   turn: Player;
   mode: PlayMode;
   passCount: number;
+  ko: Point | null;
+  over: boolean;
   winner: Player | null;
   message: string;
 };
@@ -572,6 +590,8 @@ function createGo(): GoState {
     turn: "black",
     mode: "ai",
     passCount: 0,
+    ko: null,
+    over: false,
     winner: null,
     message: "人机模式，黑猫先手，你执黑。",
   };
@@ -627,21 +647,27 @@ function goScore(state: GoState) {
 function goTryMove(state: GoState, row: number, col: number, player: Player) {
   const index = boardIndex(row, col, goSize);
   if (state.board[index]) return null;
+  // Simple ko: the opponent cannot immediately replay the point of a one-stone capture.
+  if (state.ko && state.ko.row === row && state.ko.col === col) return null;
   const nextBoard = [...state.board];
   nextBoard[index] = player;
   let captured = 0;
+  const capturedPoints: Point[] = [];
   for (const next of goNeighbors(row, col)) {
     if (nextBoard[boardIndex(next.row, next.col, goSize)] !== other(player)) continue;
     const group = goCollectGroup(nextBoard, next.row, next.col);
     if (goLiberties(nextBoard, group) === 0) {
       captured += group.length;
-      for (const point of group) nextBoard[boardIndex(point.row, point.col, goSize)] = null;
+      for (const point of group) {
+        nextBoard[boardIndex(point.row, point.col, goSize)] = null;
+        capturedPoints.push(point);
+      }
     }
   }
   const ownGroup = goCollectGroup(nextBoard, row, col);
   const liberties = goLiberties(nextBoard, ownGroup);
   if (liberties === 0) return null;
-  return { board: nextBoard, captured, liberties };
+  return { board: nextBoard, captured, capturedPoints, liberties };
 }
 
 function goApplyMove(state: GoState, row: number, col: number, player: Player) {
@@ -650,6 +676,7 @@ function goApplyMove(state: GoState, row: number, col: number, player: Player) {
   state.board = result.board;
   state.captures[player] += result.captured;
   state.passCount = 0;
+  state.ko = result.captured === 1 ? result.capturedPoints[0] : null;
   state.turn = other(player);
   state.message = result.captured ? `${playerMeta[player].name}提走 ${result.captured} 子。` : `${playerMeta[state.turn].name}落子。`;
   return true;
@@ -675,17 +702,29 @@ function goChooseAiMove(state: GoState, player: Player) {
   return best;
 }
 
+function goFinish(state: GoState) {
+  const score = goScore(state);
+  const winner: Player | null = score.black === score.white ? null : score.black > score.white ? "black" : "white";
+  state.winner = winner;
+  state.over = true;
+  state.ko = null;
+  state.message =
+    winner === null
+      ? `双方 ${score.black}:${score.white}，平局。`
+      : `${playerMeta[winner].name} ${score.black}:${score.white} 获胜。`;
+}
+
+function goEndedMessage(state: GoState) {
+  if (state.winner) return `${playerMeta[state.winner].name}已经获胜。`;
+  return "对局已结束，平局。";
+}
+
 function goPassFor(state: GoState, player: Player) {
-  if (state.winner) return;
+  if (state.over) return;
+  state.ko = null;
   state.passCount += 1;
   if (state.passCount >= 2) {
-    const score = goScore(state);
-    const winner: Player | null = score.black === score.white ? null : score.black > score.white ? "black" : "white";
-    state.winner = winner;
-    state.message =
-      winner === null
-        ? `双方 ${score.black}:${score.white}，平局。`
-        : `${playerMeta[winner].name} ${score.black}:${score.white} 获胜。`;
+    goFinish(state);
     return;
   }
   state.turn = other(player);
@@ -693,15 +732,15 @@ function goPassFor(state: GoState, player: Player) {
 }
 
 function goAiTurn(state: GoState) {
-  if (state.mode !== "ai" || state.winner || state.turn !== "white") return;
+  if (state.mode !== "ai" || state.over || state.turn !== "white") return;
   const move = goChooseAiMove(state, "white");
   if (!move) {
     goPassFor(state, "white");
-    if (!state.winner) state.message = "白猫 AI 停着，轮到黑猫。";
+    if (!state.over) state.message = "白猫 AI 停着，轮到黑猫。";
     return;
   }
   const applied = goApplyMove(state, move.row, move.col, "white");
-  if (applied && !state.winner) {
+  if (applied && !state.over) {
     state.message = `白猫 AI 落在 ${String.fromCharCode(65 + move.col)}${move.row + 1}，轮到黑猫。`;
   }
 }
@@ -717,7 +756,10 @@ function goSetMode(state: GoState, mode: PlayMode) {
 }
 
 function goPlace(state: GoState, row: number, col: number) {
-  if (state.winner) return;
+  if (state.over) {
+    state.message = goEndedMessage(state);
+    return;
+  }
   const index = boardIndex(row, col, goSize);
   if (state.board[index]) {
     state.message = "这里已经有猫子。";
@@ -729,14 +771,17 @@ function goPlace(state: GoState, row: number, col: number) {
   }
   const player = state.turn;
   if (!goApplyMove(state, row, col, player)) {
-    state.message = "这里没有气，不能自杀。";
+    state.message = state.ko && state.ko.row === row && state.ko.col === col ? "劫争，不能立刻提回。" : "这里没有气，不能自杀。";
     return;
   }
   if (state.mode === "ai") goAiTurn(state);
 }
 
 function goPass(state: GoState) {
-  if (state.winner) return;
+  if (state.over) {
+    state.message = goEndedMessage(state);
+    return;
+  }
   if (state.mode === "ai" && state.turn !== "black") {
     state.message = "白猫 AI 正在应手。";
     return;
@@ -904,7 +949,7 @@ function xiangqiInPalace(side: Player, row: number, col: number) {
   return side === "white" ? inCol && row >= 7 && row <= 9 : inCol && row >= 0 && row <= 2;
 }
 
-function xiangqiLegal(state: XiangqiState, piece: XiangqiPiece, row: number, col: number) {
+function xiangqiPseudoLegal(state: XiangqiState, piece: XiangqiPiece, row: number, col: number) {
   if (!inBoard(row, col, 10, 9)) return false;
   const target = xiangqiPieceAt(state, row, col);
   if (target?.side === piece.side) return false;
@@ -933,9 +978,10 @@ function xiangqiLegal(state: XiangqiState, piece: XiangqiPiece, row: number, col
     return !xiangqiPieceAt(state, leg.row, leg.col);
   }
   if (piece.kind === "R") {
-    return (dr === 0 || dc === 0) && xiangqiBetween(state, from, to) === 0;
+    return (dr === 0 || dc === 0) && adr + adc > 0 && xiangqiBetween(state, from, to) === 0;
   }
   if (piece.kind === "C") {
+    if (adr + adc === 0 || (dr !== 0 && dc !== 0)) return false;
     const between = xiangqiBetween(state, from, to);
     return target ? between === 1 : between === 0;
   }
@@ -943,6 +989,53 @@ function xiangqiLegal(state: XiangqiState, piece: XiangqiPiece, row: number, col
   const crossed = piece.side === "white" ? piece.row <= 4 : piece.row >= 5;
   if (dr === forward && dc === 0) return true;
   return crossed && dr === 0 && adc === 1;
+}
+
+function xiangqiFindGeneral(state: XiangqiState, side: Player) {
+  return state.pieces.find((piece) => piece.side === side && piece.kind === "G") ?? null;
+}
+
+function xiangqiGeneralsFace(state: XiangqiState) {
+  const black = xiangqiFindGeneral(state, "black");
+  const white = xiangqiFindGeneral(state, "white");
+  if (!black || !white || black.col !== white.col) return false;
+  return xiangqiBetween(state, black, white) === 0;
+}
+
+function xiangqiInCheck(state: XiangqiState, side: Player) {
+  const general = xiangqiFindGeneral(state, side);
+  if (!general) return false;
+  if (xiangqiGeneralsFace(state)) return true;
+  return state.pieces.some((piece) => piece.side !== side && xiangqiPseudoLegal(state, piece, general.row, general.col));
+}
+
+function xiangqiPreview(state: XiangqiState, piece: XiangqiPiece, row: number, col: number) {
+  const target = xiangqiPieceAt(state, row, col);
+  const saved = { row: piece.row, col: piece.col, pieces: state.pieces };
+  if (target) state.pieces = state.pieces.filter((next) => next.id !== target.id);
+  piece.row = row;
+  piece.col = col;
+  return () => {
+    piece.row = saved.row;
+    piece.col = saved.col;
+    state.pieces = saved.pieces;
+  };
+}
+
+function xiangqiIllegalReason(state: XiangqiState, piece: XiangqiPiece, row: number, col: number) {
+  if (!xiangqiPseudoLegal(state, piece, row, col)) return "这一步走法不成立。";
+  const undo = xiangqiPreview(state, piece, row, col);
+  try {
+    if (xiangqiGeneralsFace(state)) return "将帅不能照面。";
+    if (xiangqiInCheck(state, piece.side)) return "这一步会送将。";
+    return null;
+  } finally {
+    undo();
+  }
+}
+
+function xiangqiLegal(state: XiangqiState, piece: XiangqiPiece, row: number, col: number) {
+  return xiangqiIllegalReason(state, piece, row, col) === null;
 }
 
 const xiangqiValues: Record<XiangqiKind, number> = {
@@ -962,8 +1055,8 @@ function xiangqiTurnMessage(state: XiangqiState) {
 }
 
 function xiangqiApplyMove(state: XiangqiState, piece: XiangqiPiece, row: number, col: number) {
-  const target = xiangqiPieceAt(state, row, col);
   if (!xiangqiLegal(state, piece, row, col)) return false;
+  const target = xiangqiPieceAt(state, row, col);
   if (target) {
     state.pieces = state.pieces.filter((next) => next.id !== target.id);
     if (target.kind === "G") {
@@ -976,17 +1069,47 @@ function xiangqiApplyMove(state: XiangqiState, piece: XiangqiPiece, row: number,
   state.selected = null;
   if (!state.winner) {
     state.turn = other(piece.side);
+    if (!xiangqiLegalMoves(state, state.turn).length) {
+      state.winner = piece.side;
+      state.message = xiangqiInCheck(state, state.turn)
+        ? `${playerMeta[state.turn].name}被将死。`
+        : `${playerMeta[state.turn].name}无子可走。`;
+      return true;
+    }
     state.message = xiangqiTurnMessage(state);
   }
   return true;
 }
 
+function xiangqiQuietScore(piece: XiangqiPiece, row: number, col: number) {
+  const forward = piece.side === "black" ? row : 9 - row;
+  const center = 4 - Math.abs(col - 4);
+  switch (piece.kind) {
+    case "G":
+      return -80 - forward * 25 - Math.abs(col - 4) * 10;
+    case "R":
+      return forward * 7 + center * 3;
+    case "H":
+      return forward * 9 + center * 8;
+    case "C":
+      return forward * 5 + center * 10;
+    case "E":
+      return center * 3 + (forward === 2 ? 6 : 0);
+    case "A":
+      return (col === 4 ? 8 : 0) + (forward === 1 ? 4 : 0);
+    case "S":
+      return forward * 6 + center * 4 + (forward >= 5 ? 16 : 0);
+    default:
+      return 0;
+  }
+}
+
 function xiangqiMoveScore(state: XiangqiState, piece: XiangqiPiece, row: number, col: number) {
   const target = xiangqiPieceAt(state, row, col);
-  const advancement = piece.side === "black" ? row : 9 - row;
-  const center = 5 - Math.abs(col - 4);
-  const soldierBonus = piece.kind === "S" ? advancement * 8 : 0;
-  return (target ? xiangqiValues[target.kind] * 12 : 0) + xiangqiValues[piece.kind] * 0.05 + advancement * 4 + center + soldierBonus;
+  const capture = target ? xiangqiValues[target.kind] : 0;
+  // Score the move, not the piece that happens to be moving. Material * 0.05 made the general win every quiet move.
+  const moved = xiangqiQuietScore(piece, row, col) - xiangqiQuietScore(piece, piece.row, piece.col);
+  return capture * 10 + moved;
 }
 
 function xiangqiLegalMoves(state: XiangqiState, side: Player) {
@@ -1055,8 +1178,9 @@ function xiangqiCell(state: XiangqiState, row: number, col: number) {
     state.message = `${playerMeta[state.turn].name}改选 ${xiangqiLabels[target.side][target.kind]}。`;
     return;
   }
-  if (!xiangqiLegal(state, moving, row, col)) {
-    state.message = "这一步走法不成立。";
+  const reason = xiangqiIllegalReason(state, moving, row, col);
+  if (reason) {
+    state.message = reason;
     return;
   }
   if (xiangqiApplyMove(state, moving, row, col)) xiangqiAiTurn(state);
@@ -1509,19 +1633,30 @@ function tycoonPushLog(state: TycoonState, text: string) {
   state.log = [text, ...state.log].slice(0, 4);
 }
 
+function tycoonNetWorth(state: TycoonState, side: Player) {
+  const cash = state.players.find((player) => player.side === side)?.money ?? 0;
+  const estate = Object.entries(state.owners).reduce((sum, [index, owner]) => {
+    if (owner !== side) return sum;
+    return sum + (tycoonTiles[Number(index)].price ?? 0);
+  }, 0);
+  return cash + estate;
+}
+
 function tycoonCheckWinner(state: TycoonState) {
   const broke = state.players.find((player) => player.money < 0);
   if (broke) {
     state.winner = other(broke.side);
     state.phase = "gameover";
-    state.message = `${playerMeta[state.winner].name}资产领先。`;
+    state.message = `${playerMeta[state.winner].name}胜出，对方破产。`;
     return;
   }
   if (state.turnNo >= 50) {
     const [a, b] = state.players;
-    state.winner = a.money === b.money ? null : a.money > b.money ? a.side : b.side;
+    const worthA = tycoonNetWorth(state, a.side);
+    const worthB = tycoonNetWorth(state, b.side);
+    state.winner = worthA === worthB ? null : worthA > worthB ? a.side : b.side;
     state.phase = "gameover";
-    state.message = state.winner ? `${playerMeta[state.winner].name}完成收官。` : "资产相同，平局。";
+    state.message = state.winner ? `${playerMeta[state.winner].name}资产领先。` : "资产相同，平局。";
   }
 }
 
@@ -1529,9 +1664,9 @@ function tycoonApplyTile(state: TycoonState) {
   const player = tycoonActive(state);
   const tile = tycoonTiles[player.position];
   if (tile.type === "start") {
-    player.money += 60;
+    player.money += 80;
     state.phase = "end";
-    state.message = `${playerMeta[player.side].name}回到猫窝，领取 60。`;
+    state.message = `${playerMeta[player.side].name}回到猫窝，领取 80。`;
     tycoonPushLog(state, `${playerMeta[player.side].name}领取猫窝补给。`);
   } else if (tile.type === "property") {
     const owner = state.owners[player.position];
@@ -1577,8 +1712,10 @@ function tycoonRoll(state: TycoonState) {
   const d2 = Math.floor(Math.random() * 6) + 1;
   const total = d1 + d2;
   const oldPosition = player.position;
-  player.position = (player.position + total) % tycoonTiles.length;
-  if (oldPosition + total >= tycoonTiles.length) player.money += 80;
+  const wrapped = oldPosition + total >= tycoonTiles.length;
+  player.position = (oldPosition + total) % tycoonTiles.length;
+  // Landing on 猫窝 is paid once by the start tile. Passing it still pays the lap bonus.
+  if (wrapped && player.position !== 0) player.money += 80;
   state.dice = [d1, d2];
   state.turnNo += 1;
   tycoonPushLog(state, `${playerMeta[player.side].name}投出 ${d1}+${d2}。`);
@@ -1878,6 +2015,7 @@ function resetActive() {
 }
 
 function renderApp() {
+  if (!appRoot) return;
   const game = activeGame();
   const state = activeState();
   const activeTurn = getActiveTurn();
@@ -1943,7 +2081,7 @@ function closestElement(target: EventTarget | null, selector: string) {
   return target instanceof Element ? target.closest<HTMLElement>(selector) : null;
 }
 
-appRoot.addEventListener("click", (event) => {
+appRoot?.addEventListener("click", (event) => {
   const gameButton = closestElement(event.target, "[data-game]");
   if (gameButton?.dataset.game) {
     appState.active = gameButton.dataset.game as GameId;
@@ -1973,7 +2111,7 @@ appRoot.addEventListener("click", (event) => {
   }
 });
 
-document.addEventListener("keydown", (event) => {
+if (typeof document !== "undefined") document.addEventListener("keydown", (event) => {
   const key = event.key.toLowerCase();
   if ((event.metaKey || event.ctrlKey) && key === "z") {
     undoActive();
@@ -2017,4 +2155,30 @@ function mutateKeyWithUndo(event: KeyboardEvent) {
   return handled;
 }
 
-renderApp();
+if (appRoot) renderApp();
+
+export const gameTest = {
+  createGomoku,
+  gomokuChooseAiMove,
+  createGo,
+  goTryMove,
+  goApplyMove,
+  goPass,
+  goPlace,
+  goAiTurn,
+  createXiangqi,
+  xiangqiLegal,
+  xiangqiApplyMove,
+  xiangqiAiTurn,
+  xiangqiCell,
+  xiangqiLegalMoves,
+  xiangqiInCheck,
+  xiangqiGeneralsFace,
+  xiangqiPieceAt,
+  createJump,
+  jumpCell,
+  createTycoon,
+  tycoonRoll,
+  tycoonCheckWinner,
+  tycoonNetWorth,
+};
