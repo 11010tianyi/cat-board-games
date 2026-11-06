@@ -53,7 +53,19 @@ bun run ios:sync
 bun run ios:open
 ```
 
-本机如未安装 Android SDK，可以使用 GitHub Actions 的 `Build Mobile Apps` workflow 生成 debug APK artifact。
+可安装的 Android debug APK 发布在 GitHub Releases，文件名是 `cat-board-games-vX.Y.Z-debug.apk`（例如 `cat-board-games-v1.0.0-debug.apk`）：
+
+https://github.com/11010tianyi/cat-board-games/releases
+
+`Build Mobile Apps` workflow 会在 `main` 上命中现有路径过滤的推送，以及手动 `workflow_dispatch` 时构建 debug APK，并用 `GITHUB_TOKEN` 把它挂到一个新的 Release 上。这是长期下载地址。同一次构建仍会上传名为 `cat-board-games-debug-apk` 的 Actions artifact，那份文件大约 90 天后过期。
+
+版本标签在发布时根据已有 git tag 计算，workflow 不会把版本号提交回仓库：
+
+- 还没有任何 `vMAJOR.MINOR.PATCH` tag 时，第一次发布是 `v1.0.0`。`package.json` 的 `1.0.0` 只是和这次发布对齐，workflow 不读取它来决定 tag。
+- 之后每次成功构建都在最高的 semver tag 上把 patch 加一，例如 `v1.0.1`、`v1.0.2`。
+- 如果算出来的 tag 或同名 Release 已经存在（例如重跑同一次构建），这次任务不会失败，而是继续取下一个还没用过的 patch。
+
+本机已安装 JDK 17+ 和 Android SDK 36 时，可以直接打包，不必等 Release。
 
 ### Android 本机打包
 
