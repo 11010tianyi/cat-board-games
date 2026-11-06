@@ -16,9 +16,20 @@ on:
       - "vite.config.ts"
       - "tsconfig.json"
       - ".github/workflows/mobile.yml"
+      - ".github/scripts/publish-android-debug-apk.sh"
 
+# contents: write lets GITHUB_TOKEN create the release tag and upload the APK.
+# actions: write keeps the debug APK Actions artifact upload working when
+# permissions are listed explicitly. No extra secrets are used. This workflow
+# does not commit version bumps, so a release cannot retrigger itself.
 permissions:
-  contents: read
+  contents: write
+  actions: write
+
+# Queue builds so two runs cannot claim the same patch tag.
+concurrency:
+  group: android-debug-release
+  cancel-in-progress: false
 
 jobs:
   android-debug-apk:
@@ -45,12 +56,20 @@ jobs:
           java-version: "21"
 
       - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
+        with:
+          # v3 defaulted to the removed SDK package "tools". On current
+          # GitHub-hosted runners that makes cmdline-tools exit 1 with
+          # "Failed to find package 'tools'" (run 41743827118). v4 installs
+          # cmdline-tools itself and only requests platform-tools; it also
+          # skips "tools" if a caller still asks for it.
+          packages: platform-tools
+          log-accepted-android-sdk-licenses: false
 
       - name: Install Android packages
         run: |
-          yes | sdkmanager --licenses >/dev/null
-          sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+          set -euo pipefail
+          sdkmanager --install "platform-tools" "platforms;android-36" "build-tools;36.0.0"
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
@@ -65,8 +84,13 @@ jobs:
         working-directory: android
         run: ./gradlew assembleDebug
 
-      - name: Upload APK
+      - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: cat-board-games-debug-apk
           path: android/app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: .github/scripts/publish-android-debug-apk.sh android/app/build/outputs/apk/debug/app-debug.apk
