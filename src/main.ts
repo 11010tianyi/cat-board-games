@@ -1,4 +1,5 @@
 import "./styles.css";
+import { mountMusicPlayer, musicPanelExpanded, placeMusicPlayer, toggleMusicPanel } from "./music-player.ts";
 
 type Player = "black" | "white";
 type CatStyle = "drawn" | "photo" | "family";
@@ -2029,6 +2030,10 @@ function renderApp() {
           <p class="eyebrow">SVG BOARD GAMES</p>
           <h1>猫猫棋局</h1>
         </div>
+        <button type="button" class="music-launch" data-music-toggle aria-expanded="${musicPanelExpanded() ? "true" : "false"}" aria-controls="music-panel">
+          <span aria-hidden="true">♩</span>
+          <span>听曲</span>
+        </button>
       </header>
       <nav class="game-tabs" aria-label="游戏选择">
         ${gameOrder
@@ -2049,6 +2054,7 @@ function renderApp() {
           ${game.render(state)}
         </section>
         <aside class="side-panel">
+          <div class="music-slot" data-music-slot></div>
           <div class="matchup">
             ${turnChip(activeTurn)}
             <div class="versus">VS</div>
@@ -2071,6 +2077,7 @@ function renderApp() {
       </main>
     </div>
   `;
+  placeMusicPlayer();
   requestAnimationFrame(() => {
     const board = document.querySelector<SVGElement>("[data-board]");
     board?.focus({ preventScroll: true });
@@ -2082,6 +2089,10 @@ function closestElement(target: EventTarget | null, selector: string) {
 }
 
 appRoot?.addEventListener("click", (event) => {
+  if (closestElement(event.target, "[data-music-toggle], [data-music-root]")) {
+    if (closestElement(event.target, "[data-music-toggle]")) toggleMusicPanel();
+    return;
+  }
   const gameButton = closestElement(event.target, "[data-game]");
   if (gameButton?.dataset.game) {
     appState.active = gameButton.dataset.game as GameId;
@@ -2112,6 +2123,8 @@ appRoot?.addEventListener("click", (event) => {
 });
 
 if (typeof document !== "undefined") document.addEventListener("keydown", (event) => {
+  const keyTarget = event.target;
+  if (keyTarget instanceof Element && keyTarget.closest("[data-music-root], [data-music-toggle]")) return;
   const key = event.key.toLowerCase();
   if ((event.metaKey || event.ctrlKey) && key === "z") {
     undoActive();
@@ -2156,6 +2169,13 @@ function mutateKeyWithUndo(event: KeyboardEvent) {
 }
 
 if (appRoot) renderApp();
+if (typeof document !== "undefined" && document.body) {
+  try {
+    mountMusicPlayer();
+  } catch (error) {
+    console.error(error);
+  }
+}
 
 export const gameTest = {
   createGomoku,
