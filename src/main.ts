@@ -1,5 +1,15 @@
 import "./styles.css";
+import { applyImmersiveFullscreen, immersiveAfterGameChange, immersiveEscape, shellClassName, type FullscreenControls } from "./immersive.ts";
 import { mountMusicPlayer, musicPanelExpanded, placeMusicPlayer, toggleMusicPanel } from "./music-player.ts";
+import {
+  cuesForTransition,
+  playBoardCues,
+  primeBoardAudio,
+  readSfxEnabled,
+  writeSfxEnabled,
+  type KeyValueStore,
+  type SfxCue,
+} from "./sfx.ts";
 
 type Player = "black" | "white";
 type CatStyle = "drawn" | "photo" | "family";
@@ -1970,12 +1980,81 @@ function pushUndoSnapshot(id: GameId, snapshot: string, beforeMaterial: string) 
   if (stack.length > 80) stack.shift();
 }
 
-function mutateActiveWithUndo(mutator: () => void) {
+function safeStore(): KeyValueStore | null {
+  try {
+    if (typeof localStorage === "undefined") return null;
+    return localStorage;
+  } catch {
+    return null;
+  }
+}
+
+let sfxEnabled = readSfxEnabled(safeStore());
+let immersiveOn = false;
+const sfxLog: SfxCue[][] = [];
+
+function emitSfx(cues: SfxCue[]) {
+  if (!sfxEnabled || cues.length === 0) return;
+  sfxLog.push(cues.slice());
+  if (sfxLog.length > 30) sfxLog.shift();
+  try {
+    playBoardCues(cues);
+  } catch {
+    // A missing audio device should not reject the move.
+  }
+}
+
+function setSfxEnabled(on: boolean) {
+  sfxEnabled = on;
+  writeSfxEnabled(safeStore(), on);
+  if (on) primeBoardAudio();
+}
+
+function browserFullscreen(): FullscreenControls | null {
+  if (typeof document === "undefined") return null;
+  const root = document.documentElement;
+  if (!root || typeof root.requestFullscreen !== "function") return null;
+  return {
+    request() {
+      if (document.fullscreenElement) return;
+      void Promise.resolve(root.requestFullscreen()).catch(() => undefined);
+    },
+    exit() {
+      if (!document.fullscreenElement || typeof document.exitFullscreen !== "function") return;
+      void Promise.resolve(document.exitFullscreen()).catch(() => undefined);
+    },
+  };
+}
+
+function setImmersive(on: boolean) {
+  immersiveOn = on;
+  document.body?.classList.toggle("is-immersive", on);
+  applyImmersiveFullscreen(on, browserFullscreen());
+  renderApp();
+}
+
+function selectGame(id: GameId) {
+  appState.active = id;
+  immersiveOn = immersiveAfterGameChange(immersiveOn);
+  renderApp();
+}
+
+function leaveImmersiveFromKey(event: { key: string; preventDefault: () => void; stopPropagation: () => void }) {
+  if (!immersiveEscape(immersiveOn, event.key)) return false;
+  setImmersive(false);
+  event.preventDefault();
+  event.stopPropagation();
+  return true;
+}
+
+function mutateActiveWithUndo(mutator: () => void, kind: "play" | "reset" = "play") {
   const id = appState.active;
-  const before = snapshotState(id);
+  const before = JSON.parse(JSON.stringify(appState.states[id])) as unknown;
+  const undoBefore = snapshotState(id);
   const beforeMaterial = materialSnapshot(id);
   mutator();
-  pushUndoSnapshot(id, before, beforeMaterial);
+  pushUndoSnapshot(id, undoBefore, beforeMaterial);
+  if (kind === "play") emitSfx(cuesForTransition(id, before, appState.states[id], "play"));
 }
 
 function undoActive() {
@@ -2021,7 +2100,7 @@ function renderApp() {
   const state = activeState();
   const activeTurn = getActiveTurn();
   appRoot.innerHTML = `
-    <div class="app-shell">
+    <div class="${shellClassName(immersiveOn)}">
       <header class="app-header">
         <div class="brand-mark" aria-hidden="true">
           ${duoCatIcon()}
@@ -2030,10 +2109,22 @@ function renderApp() {
           <p class="eyebrow">SVG BOARD GAMES</p>
           <h1>猫猫棋局</h1>
         </div>
-        <button type="button" class="music-launch" data-music-toggle aria-expanded="${musicPanelExpanded() ? "true" : "false"}" aria-controls="music-panel">
-          <span aria-hidden="true">♩</span>
-          <span>听曲</span>
-        </button>
+        <div class="header-actions">
+          <button type="button" class="sfx-toggle${sfxEnabled ? " is-on" : ""}" data-sfx-toggle aria-pressed="${sfxEnabled ? "true" : "false"}" aria-label="${sfxEnabled ? "关闭落子音效" : "打开落子音效"}">
+            <span class="sfx-stone" aria-hidden="true"></span>
+            <span>音效</span>
+          </button>
+          <button type="button" class="music-launch" data-music-toggle aria-expanded="${musicPanelExpanded() ? "true" : "false"}" aria-controls="music-panel">
+            <span aria-hidden="true">♩</span>
+            <span>听曲</span>
+          </button>
+          <button type="button" class="immersive-launch" data-immersive-toggle aria-pressed="false" aria-label="进入沉浸模式">
+            <svg class="immersive-glyph" viewBox="0 0 16 16" aria-hidden="true">
+              <path d="M1 6 V1 H6 M10 1 H15 V6 M15 10 V15 H10 M6 15 H1 V10" fill="none" stroke="currentColor" stroke-width="1.8"></path>
+            </svg>
+            <span>沉浸</span>
+          </button>
+        </div>
       </header>
       <nav class="game-tabs" aria-label="游戏选择">
         ${gameOrder
@@ -2054,6 +2145,7 @@ function renderApp() {
           ${game.render(state)}
         </section>
         <aside class="side-panel">
+          ${immersiveOn ? `<button type="button" class="immersive-exit" data-immersive-exit aria-label="退出沉浸模式">退出 · Esc</button>` : ""}
           <div class="music-slot" data-music-slot></div>
           <div class="matchup">
             ${turnChip(activeTurn)}
@@ -2089,21 +2181,33 @@ function closestElement(target: EventTarget | null, selector: string) {
 }
 
 appRoot?.addEventListener("click", (event) => {
+  if (closestElement(event.target, "[data-sfx-toggle]")) {
+    setSfxEnabled(!sfxEnabled);
+    renderApp();
+    return;
+  }
+  if (closestElement(event.target, "[data-immersive-toggle]")) {
+    setImmersive(true);
+    return;
+  }
+  if (closestElement(event.target, "[data-immersive-exit]")) {
+    setImmersive(false);
+    return;
+  }
   if (closestElement(event.target, "[data-music-toggle], [data-music-root]")) {
     if (closestElement(event.target, "[data-music-toggle]")) toggleMusicPanel();
     return;
   }
   const gameButton = closestElement(event.target, "[data-game]");
   if (gameButton?.dataset.game) {
-    appState.active = gameButton.dataset.game as GameId;
-    renderApp();
+    selectGame(gameButton.dataset.game as GameId);
     return;
   }
   const actionButton = closestElement(event.target, "[data-action]") as HTMLButtonElement | null;
   if (actionButton?.dataset.action && !actionButton.disabled) {
     const action = actionButton.dataset.action;
     if (action === "undo") undoActive();
-    else if (action === "reset") mutateActiveWithUndo(resetActive);
+    else if (action === "reset") mutateActiveWithUndo(resetActive, "reset");
     else if (action.startsWith("catStyle:")) {
       const style = action.split(":")[1] as CatStyle;
       if (style === "drawn" || style === "photo" || style === "family") appState.catStyle = style;
@@ -2122,9 +2226,17 @@ appRoot?.addEventListener("click", (event) => {
   }
 });
 
+if (typeof document !== "undefined") {
+  document.addEventListener("keydown", (event) => {
+    leaveImmersiveFromKey(event);
+  }, true);
+}
+
 if (typeof document !== "undefined") document.addEventListener("keydown", (event) => {
+  if (event.defaultPrevented) return;
+  if (leaveImmersiveFromKey(event)) return;
   const keyTarget = event.target;
-  if (keyTarget instanceof Element && keyTarget.closest("[data-music-root], [data-music-toggle]")) return;
+  if (keyTarget instanceof Element && keyTarget.closest("[data-music-root], [data-music-toggle], [data-sfx-toggle], [data-immersive-toggle], [data-immersive-exit]")) return;
   const key = event.key.toLowerCase();
   if ((event.metaKey || event.ctrlKey) && key === "z") {
     undoActive();
@@ -2135,13 +2247,12 @@ if (typeof document !== "undefined") document.addEventListener("keydown", (event
   if (event.metaKey || event.ctrlKey || event.altKey) return;
   const number = Number(key);
   if (number >= 1 && number <= gameOrder.length) {
-    appState.active = gameOrder[number - 1];
+    selectGame(gameOrder[number - 1]);
     event.preventDefault();
-    renderApp();
     return;
   }
   if (key === "r") {
-    mutateActiveWithUndo(resetActive);
+    mutateActiveWithUndo(resetActive, "reset");
     event.preventDefault();
     renderApp();
     return;
@@ -2161,10 +2272,14 @@ if (typeof document !== "undefined") document.addEventListener("keydown", (event
 
 function mutateKeyWithUndo(event: KeyboardEvent) {
   const id = appState.active;
-  const before = snapshotState(id);
+  const before = JSON.parse(JSON.stringify(appState.states[id])) as unknown;
+  const undoBefore = snapshotState(id);
   const beforeMaterial = materialSnapshot(id);
   const handled = activeGame().handleKey(activeState(), event);
-  if (handled) pushUndoSnapshot(id, before, beforeMaterial);
+  if (handled) {
+    pushUndoSnapshot(id, undoBefore, beforeMaterial);
+    emitSfx(cuesForTransition(id, before, appState.states[id], "play"));
+  }
   return handled;
 }
 
@@ -2175,6 +2290,48 @@ if (typeof document !== "undefined" && document.body) {
   } catch (error) {
     console.error(error);
   }
+}
+
+function useGame(id: GameId) {
+  appState.active = id;
+  appState.states[id] = gameDefs[id].create() as never;
+  appState.undoStacks[id] = [];
+  renderApp();
+}
+
+function playCell(row: number, col: number) {
+  const state = activeState();
+  if ("cursor" in state) state.cursor = { row, col };
+  mutateActiveWithUndo(() => activeGame().handleCell(state, row, col), "play");
+  renderApp();
+}
+
+function playScript(mutator: (state: any) => void) {
+  mutateActiveWithUndo(() => mutator(activeState()), "play");
+  renderApp();
+}
+
+function playAction(action: string) {
+  if (action === "undo") {
+    undoActive();
+    renderApp();
+    return;
+  }
+  if (action === "reset") {
+    mutateActiveWithUndo(resetActive, "reset");
+    renderApp();
+    return;
+  }
+  if (action.startsWith("catStyle:") || action.includes("Mode:")) {
+    if (action.startsWith("catStyle:")) {
+      const style = action.split(":")[1] as CatStyle;
+      if (style === "drawn" || style === "photo" || style === "family") appState.catStyle = style;
+    } else activeGame().handleAction(activeState(), action);
+    renderApp();
+    return;
+  }
+  mutateActiveWithUndo(() => activeGame().handleAction(activeState(), action), "play");
+  renderApp();
 }
 
 export const gameTest = {
@@ -2201,4 +2358,37 @@ export const gameTest = {
   tycoonRoll,
   tycoonCheckWinner,
   tycoonNetWorth,
+  shellHtml: () => appRoot?.innerHTML ?? "",
+  isSfxEnabled: () => sfxEnabled,
+  setSfxEnabled,
+  drainSfx: () => {
+    const copy = sfxLog.map((cues) => cues.slice());
+    sfxLog.length = 0;
+    return copy;
+  },
+  isImmersive: () => immersiveOn,
+  setImmersive,
+  pressEscape: () =>
+    leaveImmersiveFromKey({
+      key: "Escape",
+      preventDefault() {},
+      stopPropagation() {},
+    }),
+  selectGame,
+  useGame,
+  playCell,
+  playAction,
+  playScript,
+  patch(id: GameId, update: (state: any) => void) {
+    appState.active = id;
+    update(appState.states[id]);
+    renderApp();
+  },
+  resetShell() {
+    setSfxEnabled(false);
+    sfxLog.length = 0;
+    immersiveOn = false;
+    document.body?.classList.toggle("is-immersive", false);
+    useGame("gomoku");
+  },
 };
