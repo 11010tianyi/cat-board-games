@@ -15,7 +15,7 @@
     "ios:sync": "bun run build:mobile && cap sync ios",
     "ios:open": "bun run ios:sync && cap open ios",
     "preview": "vite preview --host 0.0.0.0",
-    "test": "node --experimental-strip-types --import ./scripts/test-preload.mjs --test scripts/playable.test.ts scripts/music.test.ts"
+    "test": "node --experimental-strip-types --import ./scripts/test-preload.mjs --test scripts/playable.test.ts scripts/music.test.ts scripts/sfx.test.ts scripts/immersive.test.ts"
   },
   "keywords": [
     "bun",

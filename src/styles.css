@@ -684,19 +684,67 @@ h1 {
   pointer-events: auto;
 }
 
-.music-launch {
+.header-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
   margin-left: auto;
+}
+
+.sfx-toggle,
+.immersive-launch,
+.music-launch {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 6px;
-  height: 40px;
+  min-height: 44px;
   padding: 0 14px;
-  border: 1px solid rgba(255, 216, 77, 0.45);
   border-radius: 8px;
-  background: rgba(28, 24, 18, 0.92);
-  color: #f7edd7;
   font-weight: 900;
   cursor: pointer;
+}
+
+.sfx-toggle,
+.immersive-launch {
+  border: 1px solid rgba(216, 180, 111, 0.7);
+  background: rgba(36, 28, 18, 0.94);
+  color: #f3e2c4;
+}
+
+.sfx-stone {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #fff8ea, #d8b46f 42%, #6a4524 78%);
+  box-shadow: inset 0 -2px 0 rgba(0, 0, 0, 0.28);
+}
+
+.sfx-toggle.is-on {
+  border-color: #c4844a;
+  background: #c4844a;
+  color: #1b120c;
+}
+
+.sfx-toggle.is-on .sfx-stone {
+  background: radial-gradient(circle at 35% 30%, #fff, #f4df86 40%, #171613 78%);
+}
+
+.immersive-launch {
+  border-color: rgba(182, 211, 193, 0.75);
+  color: #d7eee2;
+}
+
+.immersive-glyph {
+  width: 16px;
+  height: 16px;
+}
+
+.music-launch {
+  border: 1px solid rgba(255, 216, 77, 0.45);
+  background: rgba(28, 24, 18, 0.92);
+  color: #f7edd7;
 }
 
 .music-launch:hover,
@@ -1087,6 +1135,143 @@ h1 {
   }
 }
 
+.app-header {
+  flex-wrap: wrap;
+}
+
+.sfx-toggle:hover,
+.sfx-toggle:focus-visible,
+.immersive-launch:hover,
+.immersive-launch:focus-visible,
+.immersive-exit:hover,
+.immersive-exit:focus-visible {
+  outline: 2px solid #ffd84d;
+  outline-offset: 2px;
+}
+
+.immersive-exit {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0 14px;
+  border: 2px solid #ffd84d;
+  border-radius: 8px;
+  background: #161616;
+  color: #ffd84d;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.app-shell.is-immersive {
+  width: 100%;
+  max-width: none;
+  height: 100vh;
+  height: 100dvh;
+  min-height: 0;
+  max-height: 100dvh;
+  margin: 0;
+  overflow: hidden;
+  padding:
+    max(8px, env(safe-area-inset-top, 0px))
+    max(8px, env(safe-area-inset-right, 0px))
+    max(8px, env(safe-area-inset-bottom, 0px))
+    max(8px, env(safe-area-inset-left, 0px));
+}
+
+body:has(.app-shell.is-immersive) {
+  min-height: 100dvh;
+  background: #10110f;
+}
+
+.app-shell.is-immersive .app-header,
+.app-shell.is-immersive .game-tabs,
+.app-shell.is-immersive .music-slot,
+.app-shell.is-immersive .music-dock,
+.app-shell.is-immersive .matchup,
+.app-shell.is-immersive .cat-legend,
+.app-shell.is-immersive .option-group {
+  display: none;
+}
+
+.app-shell.is-immersive .play-layout {
+  flex: 1;
+  min-height: 0;
+  height: auto;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) auto;
+  align-items: stretch;
+}
+
+.app-shell.is-immersive {
+  display: flex;
+  flex-direction: column;
+}
+
+.app-shell.is-immersive .board-stage {
+  min-height: 0;
+  height: 100%;
+  padding: 4px;
+  overflow: hidden;
+  border: 0;
+  background: transparent;
+}
+
+.app-shell.is-immersive .game-svg {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  max-height: none;
+}
+
+.app-shell.is-immersive .side-panel {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  max-height: 40dvh;
+  padding: 8px;
+  overflow: auto;
+}
+
+.app-shell.is-immersive .status-panel {
+  flex: 1 1 180px;
+  min-height: 0;
+  padding: 8px 10px;
+}
+
+.app-shell.is-immersive .status-title {
+  margin-bottom: 4px;
+}
+
+.app-shell.is-immersive .controls {
+  display: flex;
+  flex: 1 1 220px;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.app-shell.is-immersive .control-button,
+.app-shell.is-immersive .immersive-exit {
+  flex: 1 1 108px;
+  min-height: 44px;
+}
+
+@media (orientation: landscape) {
+  .app-shell.is-immersive .play-layout {
+    grid-template-columns: minmax(0, 1fr) minmax(168px, 240px);
+    grid-template-rows: minmax(0, 1fr);
+  }
+
+  .app-shell.is-immersive .side-panel {
+    align-items: stretch;
+    align-content: start;
+    overflow: auto;
+    max-height: 100%;
+  }
+}
+
 @media (max-width: 720px) {
   .app-shell {
     padding: 14px;
@@ -1101,8 +1286,16 @@ h1 {
     min-width: 0;
   }
 
-  .music-launch {
+  .header-actions {
+    width: 100%;
     margin-left: 0;
+  }
+
+  .sfx-toggle,
+  .immersive-launch,
+  .header-actions .music-launch {
+    flex: 1;
+    min-height: 44px;
   }
 
   .game-tabs {
