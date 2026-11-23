@@ -2,6 +2,43 @@ import "./styles.css";
 import { applyImmersiveFullscreen, immersiveAfterGameChange, immersiveEscape, shellClassName, type FullscreenControls } from "./immersive.ts";
 import { mountMusicPlayer, musicPanelExpanded, placeMusicPlayer, toggleMusicPanel } from "./music-player.ts";
 import {
+  createReversiBoard,
+  reversiApply,
+  reversiChooseMove,
+  reversiFinished,
+  reversiLegalMoves,
+  reversiScore,
+  type ReversiCell,
+} from "./reversi-rules.ts";
+import {
+  JUNGLE_COLS,
+  JUNGLE_LABEL,
+  JUNGLE_ROWS,
+  createJunglePieces,
+  jungleApply,
+  jungleChooseMove,
+  jungleDen,
+  jungleIsRiver,
+  jungleLegalMoves,
+  junglePieceAt,
+  jungleStatus,
+  jungleTrapOwner,
+  type JunglePiece,
+} from "./jungle-rules.ts";
+import {
+  CHESS_GLYPH,
+  CHESS_NAME,
+  chessApply,
+  chessChooseMove,
+  chessInCheck,
+  chessLegalMoves,
+  chessSquareName,
+  chessStatus,
+  createChessState,
+  type ChessMove,
+  type ChessState,
+} from "./chess-rules.ts";
+import {
   cuesForTransition,
   playBoardCues,
   primeBoardAudio,
@@ -13,7 +50,7 @@ import {
 
 type Player = "black" | "white";
 type CatStyle = "drawn" | "photo" | "family";
-type GameId = "gomoku" | "go" | "xiangqi" | "jump" | "tycoon";
+type GameId = "gomoku" | "go" | "xiangqi" | "chess" | "reversi" | "jungle" | "jump" | "tycoon";
 type PlayMode = "ai" | "local";
 type Point = { row: number; col: number };
 
@@ -220,6 +257,23 @@ function photoCatToken(side: Player, x: number, y: number, radius: number, label
 
 function catPiece(side: Player, x: number, y: number, radius: number, label = "", selected = false) {
   return appState.catStyle === "drawn" ? catToken(side, x, y, radius, label, selected) : photoCatToken(side, x, y, radius, label, selected, appState.catStyle);
+}
+
+/** A board-game "coin": cat ears, a fur disc and one strong glyph. Used by chess and jungle. */
+function catCoin(side: Player, x: number, y: number, radius: number, label: string, selected = false) {
+  const isWhite = side === "white";
+  const fur = isWhite ? "#fff8ea" : "#161513";
+  const stroke = isWhite ? "#b98950" : "#f4c63e";
+  const ink = isWhite ? "#2b2118" : "#ffe9a8";
+  return `
+    <g class="cat-coin cat-${side} ${selected ? "is-selected" : ""}" transform="translate(${x} ${y})">
+      <ellipse class="cat-shadow" cx="0" cy="${radius * 0.72}" rx="${radius * 0.98}" ry="${radius * 0.34}" />
+      <path class="coin-ear" d="M ${-radius * 0.8} ${-radius * 0.52} L ${-radius * 0.94} ${-radius * 1.34} L ${-radius * 0.26} ${-radius * 0.86} Z" fill="${fur}" stroke="${stroke}" />
+      <path class="coin-ear" d="M ${radius * 0.8} ${-radius * 0.52} L ${radius * 0.94} ${-radius * 1.34} L ${radius * 0.26} ${-radius * 0.86} Z" fill="${fur}" stroke="${stroke}" />
+      <circle class="coin-face" r="${radius}" fill="${fur}" stroke="${stroke}" />
+      <text class="coin-label" y="${radius * 0.36}" font-size="${radius * 1.02}" fill="${ink}">${escapeHtml(label)}</text>
+    </g>
+  `;
 }
 
 function catIcon(side: Player) {
@@ -1823,13 +1877,24 @@ function renderTycoon(state: TycoonState) {
       const pos = tycoonTilePosition(index);
       const owner = state.owners[index];
       const color = tile.color ?? (tile.type === "tax" ? "#333846" : tile.type === "bonus" ? "#568f5d" : tile.type === "chance" ? "#945ca8" : "#d0c18c");
+      const priceLabel = tile.price
+        ? `$${tile.price}`
+        : tile.type === "start"
+          ? "START"
+          : tile.type === "tax"
+            ? "-$45"
+            : tile.type === "bonus"
+              ? "+$50"
+              : tile.type === "chance"
+                ? "?"
+                : "";
       return `
         <g class="tycoon-tile" data-tile="${index}">
           <rect x="${pos.x}" y="${pos.y}" width="${pos.w}" height="${pos.h}" rx="8" fill="${color}" />
           <rect class="tile-inner" x="${pos.x + 5}" y="${pos.y + 5}" width="${pos.w - 10}" height="${pos.h - 10}" rx="5" />
-          ${owner ? `<circle class="owner-dot owner-${owner}" cx="${pos.x + pos.w - 15}" cy="${pos.y + 15}" r="7" />` : ""}
-          <text class="tile-name" x="${pos.x + pos.w / 2}" y="${pos.y + 32}">${escapeHtml(tile.name)}</text>
-          <text class="tile-price" x="${pos.x + pos.w / 2}" y="${pos.y + 57}">${tile.price ? `$${tile.price}` : tile.type === "start" ? "START" : ""}</text>
+          ${owner ? `<circle class="owner-dot owner-${owner}" cx="${pos.x + pos.w - 16}" cy="${pos.y + 16}" r="5.5" />` : ""}
+          <text class="tile-name" x="${pos.x + pos.w / 2}" y="${pos.y + 26}">${escapeHtml(tile.name)}</text>
+          <text class="tile-price" x="${pos.x + pos.w / 2}" y="${pos.y + 43}">${priceLabel}</text>
         </g>
       `;
     })
@@ -1838,22 +1903,25 @@ function renderTycoon(state: TycoonState) {
     .map((player, index) => {
       const pos = tycoonTilePosition(player.position);
       const sameSpot = state.players[0].position === state.players[1].position;
-      const shift = sameSpot ? (index === 0 ? -16 : 16) : 0;
-      return catPiece(player.side, pos.x + pos.w / 2 + shift, pos.y + pos.h / 2 + 14, 16);
+      const shift = sameSpot ? (index === 0 ? -14 : 14) : 0;
+      // Sit the token below the tile name and price so an occupied tile still reads.
+      return catPiece(player.side, pos.x + pos.w / 2 + shift, pos.y + pos.h - 20, 10.5);
     })
     .join("");
   const dice = state.dice ? `${state.dice[0]} + ${state.dice[1]}` : "待投";
   const moneyRows = state.players
-    .map((player) => `<text class="money-text" x="205" y="${260 + (player.side === "white" ? 42 : 0)}">${playerMeta[player.side].name} $${player.money}</text>`)
+    .map((player) => `<text class="money-text" x="205" y="${320 + (player.side === "white" ? 30 : 0)}">${playerMeta[player.side].name} $${player.money}</text>`)
     .join("");
-  const logRows = state.log.map((item, index) => `<text class="log-text" x="205" y="${350 + index * 28}">${escapeHtml(item)}</text>`).join("");
+  const logRows = state.log.map((item, index) => `<text class="log-text" x="205" y="${404 + index * 26}">${escapeHtml(item)}</text>`).join("");
   return svgBoard("tycoon-svg", "大富翁", 680, 680, `
     <rect class="board-bg city-bg" x="12" y="12" width="656" height="656" rx="18" />
     ${tiles}
     <rect class="tycoon-center" x="176" y="176" width="328" height="328" rx="18" />
-    <text class="tycoon-title" x="340" y="230">猫猫大富翁</text>
-    <text class="dice-text" x="340" y="292">骰子 ${dice}</text>
+    <text class="tycoon-title" x="340" y="222">猫猫大富翁</text>
+    <text class="dice-text" x="340" y="266">骰子 ${dice}</text>
+    <line class="tycoon-rule" x1="205" y1="290" x2="475" y2="290" />
     ${moneyRows}
+    <line class="tycoon-rule" x1="205" y1="374" x2="475" y2="374" />
     ${logRows}
     ${pieces}
   `);
@@ -1896,10 +1964,568 @@ const tycoonGame: Game<TycoonState> = {
   },
 };
 
+// Reversi (黑白棋)
+type ReversiState = {
+  board: ReversiCell[];
+  cursor: Point;
+  turn: Player;
+  mode: PlayMode;
+  winner: Player | null;
+  draw: boolean;
+  passes: number;
+  moves: number;
+  message: string;
+  lastMove: Point | null;
+  flips: Point[];
+};
+
+const reversiPoint = (index: number): Point => ({ row: Math.floor(index / 8), col: index % 8 });
+const reversiIndex = (row: number, col: number) => row * 8 + col;
+const reversiNotation = (index: number) =>
+  `${String.fromCharCode(65 + (index % 8))}${Math.floor(index / 8) + 1}`;
+
+function createReversiState(): ReversiState {
+  return {
+    board: createReversiBoard(),
+    cursor: { row: 2, col: 3 },
+    turn: "black",
+    mode: "ai",
+    winner: null,
+    draw: false,
+    passes: 0,
+    moves: 0,
+    message: "人机模式，黑猫先手。",
+    lastMove: null,
+    flips: [],
+  };
+}
+
+function reversiFinish(state: ReversiState) {
+  const score = reversiScore(state.board);
+  state.draw = score.black === score.white;
+  state.winner = state.draw ? null : score.black > score.white ? "black" : "white";
+  state.message = state.draw
+    ? `终局，黑猫 ${score.black} : ${score.white} 白猫，平局。`
+    : `终局，黑猫 ${score.black} : ${score.white} 白猫，${playerMeta[state.winner!].name}胜。`;
+}
+
+function reversiSwitch(state: ReversiState): "ok" | "pass" | "over" {
+  state.turn = other(state.turn);
+  if (reversiFinished(state.board)) {
+    reversiFinish(state);
+    return "over";
+  }
+  if (reversiLegalMoves(state.board, state.turn).length === 0) {
+    const stuck = state.turn;
+    state.turn = other(stuck);
+    state.passes += 1;
+    state.message = `${playerMeta[stuck].name}无子可下，停着。`;
+    if (reversiFinished(state.board)) {
+      reversiFinish(state);
+      return "over";
+    }
+    return "pass";
+  }
+  return "ok";
+}
+
+function reversiAiTurn(state: ReversiState) {
+  if (state.mode !== "ai" || state.winner || state.draw || state.turn !== "white") return;
+  const move = reversiChooseMove(state.board, "white", 4);
+  if (move === null) return;
+  const applied = reversiApply(state.board, move, "white");
+  if (!applied) return;
+  state.board = applied.board;
+  state.lastMove = reversiPoint(move);
+  state.flips = applied.flips.map(reversiPoint);
+  state.moves += 1;
+  const phase = reversiSwitch(state);
+  if (phase === "ok") state.message = `白猫 AI 落在 ${reversiNotation(move)}，轮到黑猫。`;
+  else if (phase === "pass") state.message += " 轮到黑猫。";
+}
+
+function reversiPlace(state: ReversiState, row: number, col: number) {
+  if (state.winner || state.draw) {
+    state.message = "对局已经结束。";
+    return;
+  }
+  if (state.mode === "ai" && state.turn !== "black") {
+    state.message = "白猫 AI 正在落子。";
+    return;
+  }
+  const index = reversiIndex(row, col);
+  const applied = reversiApply(state.board, index, state.turn);
+  if (!applied) {
+    state.message = state.board[index] ? "这里已经有猫了。" : "这里翻不到子。";
+    return;
+  }
+  state.board = applied.board;
+  state.lastMove = { row, col };
+  state.flips = applied.flips.map(reversiPoint);
+  state.moves += 1;
+  const phase = reversiSwitch(state);
+  if (phase === "ok") {
+    state.message = `${playerMeta[state.turn].name}落子。`;
+  } else if (phase === "pass") {
+    state.message += ` 轮到${playerMeta[state.turn].name}。`;
+  }
+  reversiAiTurn(state);
+}
+
+function reversiSetMode(state: ReversiState, mode: PlayMode) {
+  if (state.mode === mode) return;
+  const fresh = createReversiState();
+  Object.assign(state, fresh, {
+    mode,
+    message: mode === "ai" ? "人机模式，黑猫先手。" : "真人对弈，黑猫先手。",
+  });
+  clearUndo("reversi");
+}
+
+function renderReversi(state: ReversiState) {
+  const pad = 42;
+  const step = 62;
+  const size = pad * 2 + step * 8;
+  const legal = new Set(reversiLegalMoves(state.board, state.turn));
+  const marks = state.flips.map((point) => point.row * 8 + point.col);
+  const cells: string[] = [];
+  const pieces: string[] = [];
+  for (let row = 0; row < 8; row += 1) {
+    for (let col = 0; col < 8; col += 1) {
+      const index = row * 8 + col;
+      const x = pad + col * step;
+      const y = pad + row * step;
+      cells.push(
+        `<rect class="reversi-cell" x="${x}" y="${y}" width="${step}" height="${step}" />`,
+        `<rect class="svg-hotspot" data-cell="${row},${col}" x="${x}" y="${y}" width="${step}" height="${step}" />`,
+      );
+      if (legal.has(index) && !state.board[index]) {
+        cells.push(`<circle class="reversi-legal" cx="${x + step / 2}" cy="${y + step / 2}" r="7" />`);
+      }
+      const piece = state.board[index];
+      if (piece) {
+        if (state.lastMove?.row === row && state.lastMove.col === col) {
+          pieces.push(`<circle class="last-move-ring" cx="${x + step / 2}" cy="${y + step / 2}" r="25" />`);
+        }
+        if (marks.includes(index)) {
+          pieces.push(`<circle class="flip-ring" cx="${x + step / 2}" cy="${y + step / 2}" r="27" />`);
+        }
+        pieces.push(catPiece(piece, x + step / 2, y + step / 2, 21));
+      }
+    }
+  }
+  const score = reversiScore(state.board);
+  return svgBoard("reversi-svg", "黑白棋", size, size + 42, `
+    <rect class="board-bg felt-bg" x="8" y="8" width="${size - 16}" height="${size - 16}" rx="18" />
+    ${cells.join("")}
+    ${pieces.join("")}
+    ${renderCursor(pad + state.cursor.col * step + step / 2, pad + state.cursor.row * step + step / 2, 28)}
+    <text class="score-text" x="${pad}" y="${size + 26}">黑猫 ${score.black}  白猫 ${score.white}</text>
+  `);
+}
+
+const reversiGame: Game<ReversiState> = {
+  id: "reversi",
+  name: "黑白棋",
+  badge: "翻转",
+  create: createReversiState,
+  render: renderReversi,
+  controls: (state) =>
+    `${modePicker("黑白棋模式", "reversiMode", state.mode)}${iconButton("reset", "↻", "重开")}`,
+  handleCell: reversiPlace,
+  handleAction: (state, action) => {
+    if (action === "reversiMode:ai") reversiSetMode(state, "ai");
+    if (action === "reversiMode:local") reversiSetMode(state, "local");
+  },
+  handleKey: (state, event) => {
+    if (moveCursor(state.cursor, event, 8, 8)) return true;
+    if (event.key === "Enter" || event.key === " ") {
+      reversiPlace(state, state.cursor.row, state.cursor.col);
+      event.preventDefault();
+      return true;
+    }
+    return false;
+  },
+};
+
+// Jungle (斗兽棋)
+type JungleState = {
+  pieces: JunglePiece[];
+  selected: string | null;
+  cursor: Point;
+  turn: Player;
+  mode: PlayMode;
+  winner: Player | null;
+  message: string;
+};
+
+function createJungleState(): JungleState {
+  return {
+    pieces: createJunglePieces(),
+    selected: null,
+    cursor: { row: 6, col: 0 },
+    turn: "white",
+    mode: "ai",
+    winner: null,
+    message: "人机模式，你执白猫先行。",
+  };
+}
+
+function jungleIntro(mode: PlayMode) {
+  return mode === "ai" ? "人机模式，你执白猫先行。" : "真人对弈，白猫先行。";
+}
+
+function jungleCommit(state: JungleState, move: { id: string; row: number; col: number }) {
+  const mover = state.turn;
+  const moving = state.pieces.find((piece) => piece.id === move.id);
+  if (!moving) return;
+  const label = JUNGLE_LABEL[moving.animal];
+  const result = jungleApply(state.pieces, move);
+  state.pieces = result.pieces;
+  state.selected = null;
+  state.turn = other(mover);
+  if (result.winner) {
+    state.winner = result.winner;
+    state.message =
+      result.reason === "入穴"
+        ? `${playerMeta[result.winner].name}的${label}闯入兽穴，取胜。`
+        : `${playerMeta[result.winner].name}吃光对手，取胜。`;
+    return;
+  }
+  const status = jungleStatus(state.pieces, state.turn);
+  if (status.over) {
+    state.winner = status.winner;
+    state.message = status.winner
+      ? `${playerMeta[status.winner].name}胜，对手${status.reason}。`
+      : `和棋，${status.reason}。`;
+    return;
+  }
+  const capture = result.captured ? `吃掉${JUNGLE_LABEL[result.captured.animal]}，` : "";
+  state.message = `${playerMeta[mover].name}的${label}${capture}走到 ${move.row + 1}-${move.col + 1}。`;
+  if (state.mode === "ai" && state.turn === "black") {
+    const reply = jungleChooseMove(state.pieces, "black", 3);
+    if (reply) jungleCommit(state, reply);
+  }
+}
+
+function jungleCell(state: JungleState, row: number, col: number) {
+  if (state.winner) {
+    state.message = `${playerMeta[state.winner].name}已经取胜。`;
+    return;
+  }
+  if (state.mode === "ai" && state.turn !== "white") {
+    state.message = "黑猫 AI 正在行棋。";
+    return;
+  }
+  const target = junglePieceAt(state.pieces, row, col);
+  if (!state.selected) {
+    if (target?.side === state.turn) {
+      state.selected = target.id;
+      state.message = `${playerMeta[state.turn].name}选中 ${JUNGLE_LABEL[target.animal]}。`;
+    } else {
+      state.message = "先点自己的棋子。";
+    }
+    return;
+  }
+  const legal = jungleLegalMoves(state.pieces, state.turn).find(
+    (move) => move.id === state.selected && move.row === row && move.col === col,
+  );
+  if (!legal) {
+    if (target?.side === state.turn) {
+      state.selected = target.id;
+      state.message = `${playerMeta[state.turn].name}改选 ${JUNGLE_LABEL[target.animal]}。`;
+    } else {
+      state.message = "这只猫走不到那里。";
+    }
+    return;
+  }
+  jungleCommit(state, legal);
+}
+
+function jungleSetMode(state: JungleState, mode: PlayMode) {
+  if (state.mode === mode) return;
+  const fresh = createJungleState();
+  Object.assign(state, fresh, { mode, message: jungleIntro(mode) });
+  clearUndo("jungle");
+}
+
+function renderJungle(state: JungleState) {
+  const pad = 44;
+  const step = 58;
+  const width = pad * 2 + step * (JUNGLE_COLS - 1);
+  const height = pad * 2 + step * (JUNGLE_ROWS - 1);
+  const targets = new Set<string>();
+  if (state.selected) {
+    for (const move of jungleLegalMoves(state.pieces, state.turn)) {
+      if (move.id === state.selected) targets.add(`${move.row},${move.col}`);
+    }
+  }
+  const cells: string[] = [];
+  const pieces: string[] = [];
+  for (let row = 0; row < JUNGLE_ROWS; row += 1) {
+    for (let col = 0; col < JUNGLE_COLS; col += 1) {
+      const x = pad + col * step;
+      const y = pad + row * step;
+      const blackDen = jungleDen("black");
+      const whiteDen = jungleDen("white");
+      const isDen = (row === blackDen.row && col === blackDen.col) || (row === whiteDen.row && col === whiteDen.col);
+      const owner = jungleTrapOwner(row, col);
+      const kind = isDen ? "den" : jungleIsRiver(row, col) ? "river" : owner ? "trap" : "land";
+      const tone = isDen
+        ? row === blackDen.row
+          ? "den-black"
+          : "den-white"
+        : owner
+          ? `trap-${owner}`
+          : "";
+      cells.push(
+        `<rect class="jungle-cell jungle-${kind} ${tone}" x="${x - step / 2}" y="${y - step / 2}" width="${step - 4}" height="${step - 4}" rx="10" />`,
+        `<rect class="svg-hotspot" data-cell="${row},${col}" x="${x - step / 2}" y="${y - step / 2}" width="${step - 4}" height="${step - 4}" />`,
+      );
+      if (targets.has(`${row},${col}`)) {
+        cells.push(`<circle class="jungle-target" cx="${x}" cy="${y}" r="8" />`);
+      }
+      if (isDen) {
+        cells.push(`<text class="jungle-den-label" x="${x}" y="${y + 7}">穴</text>`);
+      }
+    }
+  }
+  for (const piece of state.pieces) {
+    const x = pad + piece.col * step;
+    const y = pad + piece.row * step;
+    pieces.push(catCoin(piece.side, x, y, 22, JUNGLE_LABEL[piece.animal], state.selected === piece.id));
+  }
+  return svgBoard("jungle-svg", "斗兽棋", width, height, `
+    <rect class="board-bg jungle-bg" x="8" y="8" width="${width - 16}" height="${height - 16}" rx="18" />
+    ${cells.join("")}
+    ${pieces.join("")}
+    ${renderCursor(pad + state.cursor.col * step, pad + state.cursor.row * step, 30)}
+  `);
+}
+
+const jungleGame: Game<JungleState> = {
+  id: "jungle",
+  name: "斗兽棋",
+  badge: "斗兽",
+  create: createJungleState,
+  render: renderJungle,
+  controls: (state) =>
+    `${modePicker("斗兽棋模式", "jungleMode", state.mode)}${iconButton("reset", "↻", "重开")}`,
+  handleCell: jungleCell,
+  handleAction: (state, action) => {
+    if (action === "jungleMode:ai") jungleSetMode(state, "ai");
+    if (action === "jungleMode:local") jungleSetMode(state, "local");
+  },
+  handleKey: (state, event) => {
+    if (moveCursor(state.cursor, event, JUNGLE_ROWS, JUNGLE_COLS)) return true;
+    if (event.key === "Enter" || event.key === " ") {
+      jungleCell(state, state.cursor.row, state.cursor.col);
+      event.preventDefault();
+      return true;
+    }
+    if (event.key === "Escape") {
+      state.selected = null;
+      state.message = `${playerMeta[state.turn].name}行棋。`;
+      event.preventDefault();
+      return true;
+    }
+    return false;
+  },
+};
+
+// Chess (国际象棋)
+type ChessUiState = {
+  game: ChessState;
+  cursor: Point;
+  selected: number | null;
+  mode: PlayMode;
+  turn: Player;
+  winner: Player | null;
+  message: string;
+  lastMove: { from: number; to: number } | null;
+};
+
+function createChessUiState(): ChessUiState {
+  return {
+    game: createChessState(),
+    cursor: { row: 6, col: 4 },
+    selected: null,
+    mode: "ai",
+    turn: "white",
+    winner: null,
+    message: "人机模式，你执白猫先行。",
+    lastMove: null,
+  };
+}
+
+function chessIntro(mode: PlayMode) {
+  return mode === "ai" ? "人机模式，你执白猫先行。" : "真人对弈，白猫先行。";
+}
+
+function chessCommit(state: ChessUiState, move: ChessMove) {
+  const mover = state.game.turn;
+  const fromName = chessSquareName(move.from);
+  const toName = chessSquareName(move.to);
+  const captured = state.game.board[move.to];
+  state.game = chessApply(state.game, move);
+  state.lastMove = { from: move.from, to: move.to };
+  state.selected = null;
+  state.turn = state.game.turn;
+  const status = chessStatus(state.game);
+  if (status.over) {
+    state.winner = status.winner;
+    state.message = status.winner
+      ? `${playerMeta[status.winner].name}胜，${status.reason}。`
+      : `和棋，${status.reason}。`;
+    return;
+  }
+  const verb = captured ? "吃" : "走";
+  let text = `${playerMeta[mover].name}${verb} ${fromName}-${toName}`;
+  if (move.promotion) text += ` 升变为${CHESS_NAME[move.promotion]}`;
+  if (chessInCheck(state.game, state.game.turn)) text += "，将军！";
+  state.message = `${text}。`;
+  if (state.mode === "ai" && state.turn === "black") {
+    const reply = chessChooseMove(state.game, 3);
+    if (reply) chessCommit(state, reply);
+  }
+}
+
+function chessCell(state: ChessUiState, row: number, col: number) {
+  if (state.winner) {
+    state.message = `${playerMeta[state.winner].name}已经取胜。`;
+    return;
+  }
+  if (state.mode === "ai" && state.turn !== "white") {
+    state.message = "黑猫 AI 正在想棋。";
+    return;
+  }
+  const index = row * 8 + col;
+  const piece = state.game.board[index];
+  if (state.selected === null) {
+    if (piece?.side === state.turn) {
+      state.selected = index;
+      state.message = `${playerMeta[state.turn].name}选中 ${CHESS_NAME[piece.type]} ${chessSquareName(index)}。`;
+    } else {
+      state.message = "先点自己的棋子。";
+    }
+    return;
+  }
+  const moves = chessLegalMoves(state.game).filter(
+    (move) => move.from === state.selected && move.to === index,
+  );
+  if (moves.length > 0) {
+    const chosen = moves.find((move) => move.promotion === "q") ?? moves[0];
+    chessCommit(state, chosen);
+    return;
+  }
+  if (piece?.side === state.turn) {
+    state.selected = index;
+    state.message = `${playerMeta[state.turn].name}改选 ${CHESS_NAME[piece.type]} ${chessSquareName(index)}。`;
+    return;
+  }
+  state.message = "这一步走法不成立。";
+}
+
+function chessSetMode(state: ChessUiState, mode: PlayMode) {
+  if (state.mode === mode) return;
+  const fresh = createChessUiState();
+  Object.assign(state, fresh, { mode, message: chessIntro(mode) });
+  clearUndo("chess");
+}
+
+function renderChess(state: ChessUiState) {
+  const pad = 30;
+  const step = 62;
+  const size = pad * 2 + step * 8;
+  const board = state.game.board;
+  const legalTargets = new Set<number>(
+    state.selected === null
+      ? []
+      : chessLegalMoves(state.game)
+          .filter((move) => move.from === state.selected)
+          .map((move) => move.to),
+  );
+  const checkSquare = chessInCheck(state.game, state.game.turn)
+    ? board.findIndex((piece) => piece?.type === "k" && piece.side === state.game.turn)
+    : -1;
+  const shades: string[] = [];
+  const marks: string[] = [];
+  const pieces: string[] = [];
+  for (let row = 0; row < 8; row += 1) {
+    for (let col = 0; col < 8; col += 1) {
+      const index = row * 8 + col;
+      const x = pad + col * step;
+      const y = pad + row * step;
+      const dark = (row + col) % 2 === 1;
+      shades.push(
+        `<rect class="chess-square ${dark ? "chess-dark" : "chess-light"}" x="${x}" y="${y}" width="${step}" height="${step}" />`,
+      );
+      if (state.lastMove && (index === state.lastMove.from || index === state.lastMove.to)) {
+        marks.push(`<rect class="chess-last" x="${x}" y="${y}" width="${step}" height="${step}" />`);
+      }
+      if (index === checkSquare) {
+        marks.push(`<rect class="chess-check" x="${x}" y="${y}" width="${step}" height="${step}" />`);
+      }
+      if (legalTargets.has(index)) {
+        marks.push(
+          board[index]
+            ? `<rect class="chess-capture" x="${x + 4}" y="${y + 4}" width="${step - 8}" height="${step - 8}" rx="10" />`
+            : `<circle class="chess-target" cx="${x + step / 2}" cy="${y + step / 2}" r="8" />`,
+        );
+      }
+      shades.push(`<rect class="svg-hotspot" data-cell="${row},${col}" x="${x}" y="${y}" width="${step}" height="${step}" />`);
+      const piece = board[index];
+      if (piece) {
+        pieces.push(catCoin(piece.side, x + step / 2, y + step / 2, 23, CHESS_GLYPH[piece.type], state.selected === index));
+      }
+    }
+  }
+  return svgBoard("chess-svg", "国际象棋", size, size, `
+    <rect class="board-bg chess-bg" x="8" y="8" width="${size - 16}" height="${size - 16}" rx="18" />
+    ${shades.join("")}
+    ${marks.join("")}
+    ${pieces.join("")}
+    ${renderCursor(pad + state.cursor.col * step + step / 2, pad + state.cursor.row * step + step / 2, 29)}
+  `);
+}
+
+const chessGame: Game<ChessUiState> = {
+  id: "chess",
+  name: "国际象棋",
+  badge: "国象",
+  create: createChessUiState,
+  render: renderChess,
+  controls: (state) =>
+    `${modePicker("国际象棋模式", "chessMode", state.mode)}${iconButton("reset", "↻", "重开")}`,
+  handleCell: chessCell,
+  handleAction: (state, action) => {
+    if (action === "chessMode:ai") chessSetMode(state, "ai");
+    if (action === "chessMode:local") chessSetMode(state, "local");
+  },
+  handleKey: (state, event) => {
+    if (moveCursor(state.cursor, event, 8, 8)) return true;
+    if (event.key === "Enter" || event.key === " ") {
+      chessCell(state, state.cursor.row, state.cursor.col);
+      event.preventDefault();
+      return true;
+    }
+    if (event.key === "Escape") {
+      state.selected = null;
+      state.message = `${playerMeta[state.turn].name}行棋。`;
+      event.preventDefault();
+      return true;
+    }
+    return false;
+  },
+};
+
 type GameStateMap = {
   gomoku: GomokuState;
   go: GoState;
   xiangqi: XiangqiState;
+  chess: ChessUiState;
+  reversi: ReversiState;
+  jungle: JungleState;
   jump: JumpState;
   tycoon: TycoonState;
 };
@@ -1909,11 +2535,14 @@ const gameDefs: { [K in GameId]: Game<GameStateMap[K]> } = {
   gomoku: gomokuGame,
   go: goGame,
   xiangqi: xiangqiGame,
+  chess: chessGame,
+  reversi: reversiGame,
+  jungle: jungleGame,
   jump: jumpGame,
   tycoon: tycoonGame,
 };
 
-const gameOrder: GameId[] = ["gomoku", "go", "xiangqi", "jump", "tycoon"];
+const gameOrder: GameId[] = ["gomoku", "go", "xiangqi", "chess", "reversi", "jungle", "jump", "tycoon"];
 
 const appState: { active: GameId; catStyle: CatStyle; states: GameStateMap; undoStacks: UndoStacks } = {
   active: "gomoku",
@@ -1922,6 +2551,9 @@ const appState: { active: GameId; catStyle: CatStyle; states: GameStateMap; undo
     gomoku: gomokuGame.create(),
     go: goGame.create(),
     xiangqi: xiangqiGame.create(),
+    chess: chessGame.create(),
+    reversi: reversiGame.create(),
+    jungle: jungleGame.create(),
     jump: jumpGame.create(),
     tycoon: tycoonGame.create(),
   },
@@ -1929,6 +2561,9 @@ const appState: { active: GameId; catStyle: CatStyle; states: GameStateMap; undo
     gomoku: [],
     go: [],
     xiangqi: [],
+    chess: [],
+    reversi: [],
+    jungle: [],
     jump: [],
     tycoon: [],
   },
@@ -1959,7 +2594,7 @@ function clearUndo(id: GameId) {
 
 function snapshotState(id: GameId) {
   const state = JSON.parse(JSON.stringify(appState.states[id]));
-  if (id === "xiangqi") state.selected = null;
+  if (id === "xiangqi" || id === "chess" || id === "jungle") state.selected = null;
   if (id === "jump" && !state.mustContinue) state.selected = null;
   return JSON.stringify(state);
 }
@@ -1968,7 +2603,7 @@ function materialSnapshot(id: GameId) {
   const state = JSON.parse(JSON.stringify(appState.states[id]));
   delete state.cursor;
   delete state.message;
-  if (id === "xiangqi") delete state.selected;
+  if (id === "xiangqi" || id === "chess" || id === "jungle") delete state.selected;
   if (id === "jump" && !state.mustContinue) delete state.selected;
   return JSON.stringify(state);
 }
@@ -2077,7 +2712,9 @@ function hasActiveUndo() {
 function introMessage(id: GameId, mode: PlayMode) {
   if (id === "gomoku") return mode === "ai" ? "人机模式，黑猫先手。" : "双人模式，黑猫先手。";
   if (id === "go") return mode === "ai" ? "人机模式，黑猫先手，你执黑。" : "真人对弈，黑猫先手。";
-  if (id === "xiangqi") return mode === "ai" ? "人机模式，你执白猫先行。" : "真人对弈，白猫先行。";
+  if (id === "xiangqi" || id === "chess" || id === "jungle") {
+    return mode === "ai" ? "人机模式，你执白猫先行。" : "真人对弈，白猫先行。";
+  }
   if (id === "jump") return mode === "ai" ? "人机模式，黑猫先跳，你执黑。" : "真人对弈，黑猫先跳。";
   return mode === "ai" ? "人机模式，黑猫先投骰，你执黑。" : "真人对弈，黑猫先投骰。";
 }
@@ -2170,6 +2807,8 @@ function renderApp() {
     </div>
   `;
   placeMusicPlayer();
+  const liveStatus = document.querySelector("#sr-status");
+  if (liveStatus) liveStatus.textContent = `${game.name}：${getMessage()}`;
   requestAnimationFrame(() => {
     const board = document.querySelector<SVGElement>("[data-board]");
     board?.focus({ preventScroll: true });

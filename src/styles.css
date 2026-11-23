@@ -26,6 +26,19 @@ button {
   font: inherit;
 }
 
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
 .app-shell {
   width: min(1440px, 100%);
   margin: 0 auto;
@@ -80,7 +93,7 @@ h1 {
 
 .game-tabs {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 9px;
   margin: 18px 0;
 }
@@ -378,9 +391,10 @@ h1 {
 }
 
 .score-text {
-  fill: #2d1b0d;
-  font-size: 19px;
+  fill: #f2ddb2;
+  font-size: 18px;
   font-weight: 800;
+  letter-spacing: 0.14em;
   text-anchor: start;
 }
 
@@ -422,14 +436,15 @@ h1 {
 
 .tile-name {
   fill: #222;
-  font-size: 14px;
+  font-size: 13.5px;
   font-weight: 900;
 }
 
 .tile-price {
   fill: #3e3e3e;
-  font-size: 12px;
+  font-size: 11.5px;
   font-weight: 800;
+  letter-spacing: 0.02em;
 }
 
 .owner-dot {
@@ -468,6 +483,11 @@ h1 {
   font-size: 20px;
   font-weight: 900;
   text-anchor: start;
+}
+
+.tycoon-rule {
+  stroke: rgba(255, 216, 77, 0.24);
+  stroke-width: 1.5;
 }
 
 .log-text {
@@ -1318,4 +1338,136 @@ body:has(.app-shell.is-immersive) {
   .controls {
     grid-template-columns: 1fr;
   }
+}
+
+/* Reversi, jungle and chess share the coin token so the cat theme survives a
+   glyph-heavy board. */
+.cat-coin {
+  pointer-events: none;
+}
+
+.coin-face {
+  stroke-width: 2.2;
+  filter: drop-shadow(0 2px 2px rgba(0, 0, 0, 0.3));
+}
+
+.coin-ear {
+  stroke-width: 1.8;
+  stroke-linejoin: round;
+}
+
+.coin-label {
+  text-anchor: middle;
+  font-weight: 900;
+  pointer-events: none;
+  letter-spacing: 0;
+}
+
+.cat-coin.is-selected .coin-face {
+  stroke: #ffef9d;
+  stroke-width: 4;
+}
+
+.felt-bg {
+  fill: #24503f;
+}
+
+.reversi-cell {
+  fill: #35755c;
+  stroke: rgba(0, 0, 0, 0.26);
+  stroke-width: 1.5;
+}
+
+.reversi-legal {
+  fill: rgba(255, 216, 77, 0.55);
+  pointer-events: none;
+}
+
+.jungle-bg {
+  fill: #1f2a1c;
+}
+
+.jungle-cell {
+  stroke: rgba(0, 0, 0, 0.3);
+  stroke-width: 1.5;
+}
+
+.jungle-land {
+  fill: #55704b;
+}
+
+.jungle-river {
+  fill: #2f5f7d;
+}
+
+.jungle-trap {
+  fill: #8a5a2b;
+}
+
+.jungle-den {
+  fill: #1c1712;
+  stroke: rgba(255, 216, 77, 0.85);
+  stroke-width: 2.5;
+}
+
+.jungle-trap-black {
+  fill: #7d4f2a;
+}
+
+.jungle-trap-white {
+  fill: #8f6535;
+}
+
+.jungle-target {
+  fill: rgba(255, 216, 77, 0.6);
+  pointer-events: none;
+}
+
+.jungle-den-label {
+  fill: rgba(255, 216, 77, 0.9);
+  font-size: 15px;
+  font-weight: 900;
+  text-anchor: middle;
+  pointer-events: none;
+}
+
+.chess-bg {
+  fill: #17130f;
+}
+
+.chess-light {
+  fill: #e8d6b0;
+}
+
+.chess-dark {
+  fill: #95714c;
+}
+
+.chess-last {
+  fill: rgba(255, 216, 77, 0.32);
+  pointer-events: none;
+}
+
+.chess-check {
+  fill: rgba(214, 66, 66, 0.5);
+  pointer-events: none;
+}
+
+.chess-target {
+  fill: rgba(28, 22, 16, 0.34);
+  pointer-events: none;
+}
+
+.chess-capture {
+  fill: none;
+  stroke: rgba(214, 66, 66, 0.9);
+  stroke-width: 4;
+  pointer-events: none;
+}
+
+.flip-ring {
+  fill: none;
+  stroke: rgba(255, 216, 77, 0.92);
+  stroke-width: 3.5;
+  pointer-events: none;
 }

@@ -27,6 +27,8 @@ type Boardish = {
   over?: boolean;
   pieces?: Array<{ id: string; row: number; col: number }>;
   phase?: string;
+  draw?: boolean;
+  lastMove?: { from: number; to: number } | null;
 };
 
 const GOMOKU_CELLS = 15 * 15;
@@ -35,6 +37,9 @@ const humanSide: Record<string, Side> = {
   gomoku: "black",
   go: "black",
   xiangqi: "white",
+  chess: "white",
+  reversi: "black",
+  jungle: "white",
   jump: "black",
   tycoon: "black",
 };
@@ -112,6 +117,9 @@ function justEnded(gameId: string, before: Boardish, after: Boardish) {
   if (gameId === "gomoku") return !gomokuOver(before) && gomokuOver(after);
   if (gameId === "go") return before.over !== true && after.over === true;
   if (gameId === "tycoon") return before.phase !== "gameover" && after.phase === "gameover";
+  if (gameId === "reversi") {
+    return !before.winner && !before.draw && Boolean(after.winner || after.draw);
+  }
   return !before.winner && Boolean(after.winner);
 }
 
@@ -126,6 +134,14 @@ function resultCue(gameId: string, state: Boardish): SfxCue {
 function placesFor(gameId: string, before: Boardish, after: Boardish) {
   if (gameId === "gomoku" || gameId === "go") return newStones(before, after);
   if (gameId === "xiangqi") return landings(before, after);
+  // One click is one turn even when a move flips a stack of discs or captures.
+  if (gameId === "jungle") return Math.min(1, landings(before, after));
+  if (gameId === "reversi") return newStones(before, after) > 0 ? 1 : 0;
+  if (gameId === "chess") {
+    const prev = before.lastMove;
+    const next = after.lastMove;
+    return next && (!prev || prev.from !== next.from || prev.to !== next.to) ? 1 : 0;
+  }
   return 0;
 }
 
@@ -136,7 +152,8 @@ export function cuesForTransition(gameId: string, before: unknown, after: unknow
   if (!prev || !next) return [];
   if (gameId === "gomoku" && gomokuOver(prev)) return [];
   if (gameId === "go" && prev.over === true) return [];
-  if ((gameId === "xiangqi" || gameId === "jump") && prev.winner) return [];
+  if ((gameId === "xiangqi" || gameId === "jump" || gameId === "chess" || gameId === "jungle") && prev.winner) return [];
+  if (gameId === "reversi" && (prev.winner || prev.draw)) return [];
   if (gameId === "tycoon" && prev.phase === "gameover") return [];
 
   const cues: SfxCue[] = [];
