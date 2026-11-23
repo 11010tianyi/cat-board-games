@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="猫猫棋局">
+  <rect width="64" height="64" rx="16" fill="#17171a" />
+  <path d="M14 27 L12.5 9.5 L26.5 19.5 Z" fill="#ffe9a8" />
+  <path d="M50 27 L51.5 9.5 L37.5 19.5 Z" fill="#ffe9a8" />
+  <ellipse cx="32" cy="37.5" rx="19.5" ry="17.5" fill="#ffe9a8" />
+  <ellipse cx="25" cy="34.5" rx="3.3" ry="4.7" fill="#1b1b1b" />
+  <ellipse cx="39" cy="34.5" rx="3.3" ry="4.7" fill="#1b1b1b" />
+  <circle cx="26.2" cy="32.8" r="1.1" fill="#fff8ea" />
+  <circle cx="40.2" cy="32.8" r="1.1" fill="#fff8ea" />
+  <path d="M32 42.5 L29.4 45.1 H34.6 Z" fill="#c9772f" />
+  <path d="M32 45.1 Q29.2 48.2 26.4 46.4 M32 45.1 Q34.8 48.2 37.6 46.4" stroke="#c9772f" stroke-width="1.7" fill="none" stroke-linecap="round" />
+  <path d="M9 39 H15.5 M9 44 H15.5 M55 39 H48.5 M55 44 H48.5" stroke="#ffe9a8" stroke-width="1.5" stroke-linecap="round" opacity="0.75" />
+</svg>

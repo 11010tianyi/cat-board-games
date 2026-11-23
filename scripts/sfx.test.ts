@@ -278,3 +278,38 @@ test("real moves trigger cues and illegal, undo, or reset actions stay quiet", (
   });
   assert.deepEqual(gameTest.drainSfx().flat(), ["place", "lose"]);
 });
+
+test("chess, reversi and jungle cue one sound per turn and know the human side", () => {
+  const empty = Array<"black" | "white" | null>(64).fill(null);
+  const board = empty.slice();
+  board[19] = "black";
+  board[27] = "black";
+  assert.deepEqual(
+    cuesForTransition("reversi", { mode: "ai", winner: null, board: empty }, { mode: "ai", winner: null, board }, "play"),
+    ["place"],
+  );
+  assert.deepEqual(
+    cuesForTransition("reversi", { mode: "ai", winner: null, board }, { mode: "ai", winner: null, draw: true, board }, "play"),
+    ["draw"],
+  );
+
+  const pieces = [{ id: "black-lion", row: 2, col: 1 }];
+  const moved = [{ id: "black-lion", row: 3, col: 1 }];
+  assert.deepEqual(
+    cuesForTransition("jungle", { mode: "ai", winner: null, pieces }, { mode: "ai", winner: null, pieces: moved }, "play"),
+    ["place"],
+  );
+
+  assert.deepEqual(
+    cuesForTransition("chess", { mode: "ai", winner: null, lastMove: null }, { mode: "ai", winner: null, lastMove: { from: 52, to: 36 } }, "play"),
+    ["place"],
+  );
+  assert.deepEqual(
+    cuesForTransition("chess", { mode: "ai", winner: null, lastMove: { from: 12, to: 28 } }, { mode: "ai", winner: "white", lastMove: { from: 40, to: 12 } }, "play"),
+    ["place", "win"],
+  );
+  assert.deepEqual(
+    cuesForTransition("chess", { mode: "ai", winner: null, lastMove: { from: 12, to: 28 } }, { mode: "ai", winner: "black", lastMove: { from: 40, to: 12 } }, "play"),
+    ["place", "lose"],
+  );
+});
